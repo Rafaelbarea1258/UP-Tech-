@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Orçamento — UpTECH</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --brand:#2a78d6; --brand-dark:#184f95; --brand-bg:#eef4fc;
+    --text-primary:#0b0b0b; --text-secondary:#52514e; --muted:#898781;
+    --gridline:#e1e0d9; --surface:#fcfcfb; --page:#f4f5f4;
+    --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--page);color:var(--text-primary);}
+  .wrap{max-width:640px;margin:0 auto;padding:20px 16px 60px;}
+  .header{display:flex;align-items:center;gap:10px;margin-bottom:20px;padding-top:8px;}
+  .header .mark{width:38px;height:38px;border-radius:10px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;flex-shrink:0;}
+  .header .name{font-size:19px;font-weight:700;letter-spacing:-0.02em;}
+  .card{background:var(--surface);border:1px solid var(--gridline);border-radius:14px;padding:20px;margin-bottom:16px;}
+  .doc-title{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:4px;}
+  .doc-title h1{font-size:17px;margin:0 0 4px;}
+  .doc-title .muted{color:var(--muted);font-size:12.5px;}
+  .badge{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;padding:4px 9px;border-radius:100px;white-space:nowrap;}
+  .badge-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+  .badge-blue{background:#eaf1fc;color:var(--brand-dark);}
+  .badge-blue .badge-dot{background:var(--brand);}
+  .badge-good{background:#e7f8e7;color:#0a6b0a;}
+  .badge-good .badge-dot{background:var(--good);}
+  .badge-warning{background:#fff5e0;color:#8a5c00;}
+  .badge-warning .badge-dot{background:var(--warning);}
+  .badge-serious{background:#fdece4;color:#a3431e;}
+  .badge-serious .badge-dot{background:var(--serious);}
+  .badge-critical{background:#fceaea;color:#96201f;}
+  .badge-critical .badge-dot{background:var(--critical);}
+  .badge-muted{background:#eeeeec;color:var(--text-secondary);}
+  .badge-muted .badge-dot{background:var(--muted);}
+  .section-label{font-size:10.5px;text-transform:uppercase;letter-spacing:0.04em;color:var(--muted);font-weight:700;margin-bottom:6px;}
+  .info-line{font-size:13.5px;color:var(--text-secondary);margin-bottom:2px;}
+  .info-line strong{color:var(--text-primary);}
+  table{width:100%;border-collapse:collapse;margin-top:6px;}
+  th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:0.03em;color:var(--muted);border-bottom:2px solid var(--gridline);padding:8px 4px;}
+  td{padding:9px 4px;border-bottom:1px solid var(--gridline);font-size:13.5px;}
+  .totals{margin-left:auto;width:100%;max-width:280px;margin-top:10px;}
+  .totals div{display:flex;justify-content:space-between;padding:3px 0;font-size:13.5px;color:var(--text-secondary);}
+  .totals .total{font-weight:700;font-size:17px;color:var(--text-primary);border-top:2px solid var(--text-primary);margin-top:6px;padding-top:8px;}
+  .btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;}
+  .btn{border:none;border-radius:9px;padding:11px 18px;font-size:14px;font-weight:600;cursor:pointer;flex:1;min-width:140px;text-align:center;}
+  .btn-primary{background:var(--brand);color:#fff;}
+  .btn-primary:hover{background:var(--brand-dark);}
+  .btn-danger{background:#fff;color:var(--critical);border:1px solid var(--critical);}
+  .btn-danger:hover{background:#fceaea;}
+  .btn:disabled{opacity:0.55;cursor:default;}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.6;}
+  .center-msg{text-align:center;padding:60px 20px;color:var(--muted);font-size:14px;}
+  .spinner{width:22px;height:22px;border:2px solid var(--gridline);border-top-color:var(--brand);border-radius:50%;animation:spin .7s linear infinite;margin:20px auto;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .feedback-box{margin-top:14px;padding:12px 14px;border-radius:10px;font-size:13.5px;font-weight:600;text-align:center;}
+  .feedback-good{background:#e7f8e7;color:#0a6b0a;}
+  .feedback-critical{background:#fceaea;color:#96201f;}
+  .footer-note{text-align:center;font-size:11.5px;color:var(--muted);margin-top:24px;line-height:1.7;}
+  @media print{ .btnrow, .footer-note{display:none;} body{background:#fff;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header"><div class="mark">UT</div><div class="name">UpTECH</div></div>
+  <div id="content"><div class="center-msg"><div class="spinner"></div>Carregando orçamento...</div></div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://wcchaejzblaerhndkkym.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_uk8FFRvd9A-8jZ_Pf80lfg_z8372CXq";
+const sb = (typeof window.supabase !== 'undefined') ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
+function fmtMoney(v){ return (Number(v)||0).toLocaleString('pt-BR', {style:'currency', currency:'BRL'}); }
+function fmtDate(d){
+  if(!d) return '-';
+  if(typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)){
+    const [y,m,day] = d.split('-');
+    return day+'/'+m+'/'+y;
+  }
+  const dt = new Date(d);
+  return dt.toLocaleDateString('pt-BR');
+}
+function escapeHtml(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+const OS_STATUS = [
+  { key: 'aguardando_diagnostico', label: 'Aguardando diagnóstico', badge: 'badge-muted' },
+  { key: 'aguardando_aprovacao', label: 'Aguardando sua aprovação', badge: 'badge-warning' },
+  { key: 'aguardando_peca', label: 'Aguardando peça', badge: 'badge-serious' },
+  { key: 'em_andamento', label: 'Em andamento', badge: 'badge-blue' },
+  { key: 'concluido', label: 'Concluído', badge: 'badge-good' },
+  { key: 'entregue', label: 'Entregue', badge: 'badge-good' },
+  { key: 'cancelado', label: 'Cancelado / recusado', badge: 'badge-critical' },
+];
+function osStatusInfo(key){ return OS_STATUS.find(s=>s.key===key) || OS_STATUS[0]; }
+
+const ORC_STATUS = [
+  { key: 'aberto', label: 'Aguardando sua resposta', badge: 'badge-warning' },
+  { key: 'aprovado', label: 'Aprovado', badge: 'badge-good' },
+  { key: 'recusado', label: 'Recusado', badge: 'badge-critical' },
+  { key: 'expirado', label: 'Expirado', badge: 'badge-muted' },
+  { key: 'convertido', label: 'Aprovado e finalizado', badge: 'badge-good' },
+];
+function orcStatusInfo(key){ return ORC_STATUS.find(s=>s.key===key) || ORC_STATUS[0]; }
+
+const params = new URLSearchParams(window.location.search);
+const tipo = params.get('tipo');
+const id = params.get('id');
+const contentEl = document.getElementById('content');
+
+function renderErro(msg){
+  contentEl.innerHTML = `<div class="card"><div class="center-msg" style="padding:30px 10px;">${escapeHtml(msg)}</div></div>`;
+}
+
+function feedback(el, ok, msg){
+  const box = document.createElement('div');
+  box.className = 'feedback-box ' + (ok ? 'feedback-good' : 'feedback-critical');
+  box.textContent = msg;
+  el.appendChild(box);
+}
+
+async function carregarOrcamento(){
+  const { data: rows, error } = await sb.from('orcamentos').select('*').eq('id', id).limit(1);
+  if(error || !rows || !rows.length){ renderErro('Orçamento não encontrado. Verifique se o link está correto.'); return; }
+  const o = rows[0];
+  const [{ data: itens }, { data: clienteRows }] = await Promise.all([
+    sb.from('orcamento_itens').select('*').eq('orcamento_id', o.id),
+    o.cliente_id ? sb.from('clientes').select('*').eq('id', o.cliente_id).limit(1) : Promise.resolve({data:[]}),
+  ]);
+  const cliente = (clienteRows||[])[0];
+  const venc = new Date(o.created_at); venc.setDate(venc.getDate() + (o.validade_dias||7));
+  const vencida = o.status==='aberto' && venc < new Date();
+  const statusKey = vencida ? 'expirado' : o.status;
+  const st = orcStatusInfo(statusKey);
+  const subtotal = (itens||[]).reduce((s,i)=> s + Number(i.subtotal||0), 0);
+  const podeResponder = o.status==='aberto' && !vencida;
+
+  contentEl.innerHTML = `
+    <div class="card">
+      <div class="doc-title">
+        <div>
+          <h1>Orçamento Nº ${o.numero}</h1>
+          <div class="muted">Emitido em ${fmtDate(o.created_at)} &middot; válido até ${fmtDate(venc)}</div>
+        </div>
+        <span class="badge ${st.badge}"><span class="badge-dot"></span>${st.label}</span>
+      </div>
+      ${cliente ? `<div class="info-line" style="margin-top:10px;"><strong>Cliente:</strong> ${escapeHtml(cliente.nome)}</div>` : ''}
+    </div>
+    <div class="card">
+      <div class="section-label">Itens</div>
+      <table>
+        <thead><tr><th>Produto</th><th style="text-align:center;">Qtd.</th><th style="text-align:right;">Subtotal</th></tr></thead>
+        <tbody>${(itens||[]).map(i=>`<tr><td>${escapeHtml(i.produto_nome)}</td><td style="text-align:center;">${i.quantidade}</td><td style="text-align:right;">${fmtMoney(i.subtotal)}</td></tr>`).join('')}</tbody>
+      </table>
+      <div class="totals">
+        <div><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
+        <div><span>Desconto</span><span>- ${fmtMoney(o.desconto)}</span></div>
+        <div class="total"><span>Total</span><span>${fmtMoney(o.total)}</span></div>
+      </div>
+    </div>
+    <div class="card" id="acaoCard">
+      ${podeResponder ? `
+        <div class="section-label">O que você deseja fazer?</div>
+        <div class="btnrow">
+          <button class="btn btn-primary" id="btnAprovar">Aprovar orçamento</button>
+          <button class="btn btn-danger" id="btnRecusar">Recusar</button>
+        </div>
+        <div class="hint">Ao aprovar, a loja UpTECH entrará em contato para combinar a entrega/retirada e o pagamento.</div>
+      ` : vencida ? `<div class="hint" style="margin-top:0;">Este orçamento venceu. Entre em contato com a loja para gerar um novo.</div>`
+        : `<div class="hint" style="margin-top:0;">Este orçamento já foi respondido (${st.label.toLowerCase()}).</div>`}
+    </div>
+    <div class="footer-note">UpTECH — Loja de celulares e computadores<br>Orçamento sujeito a alteração conforme disponibilidade de estoque.</div>
+  `;
+
+  const aprovarBtn = document.getElementById('btnAprovar');
+  const recusarBtn = document.getElementById('btnRecusar');
+  if(aprovarBtn){
+    aprovarBtn.addEventListener('click', async ()=>{
+      aprovarBtn.disabled = true; recusarBtn.disabled = true; aprovarBtn.textContent = 'Enviando...';
+      const { error: err2 } = await sb.from('orcamentos').update({status:'aprovado'}).eq('id', o.id);
+      const card = document.getElementById('acaoCard');
+      card.innerHTML = `<div class="section-label">O que você deseja fazer?</div>`;
+      if(err2){ feedback(card, false, 'Não foi possível enviar sua resposta agora. Tente novamente em instantes.'); }
+      else{ feedback(card, true, 'Orçamento aprovado! A loja UpTECH já foi notificada.'); }
+    });
+  }
+  if(recusarBtn){
+    recusarBtn.addEventListener('click', async ()=>{
+      aprovarBtn.disabled = true; recusarBtn.disabled = true; recusarBtn.textContent = 'Enviando...';
+      const { error: err2 } = await sb.from('orcamentos').update({status:'recusado'}).eq('id', o.id);
+      const card = document.getElementById('acaoCard');
+      card.innerHTML = `<div class="section-label">O que você deseja fazer?</div>`;
+      if(err2){ feedback(card, false, 'Não foi possível enviar sua resposta agora. Tente novamente em instantes.'); }
+      else{ feedback(card, true, 'Tudo bem, orçamento recusado. Obrigado por avisar!'); }
+    });
+  }
+}
+
+async function carregarOS(){
+  const { data: rows, error } = await sb.from('ordens_servico').select('*').eq('id', id).limit(1);
+  if(error || !rows || !rows.length){ renderErro('Ordem de serviço não encontrada. Verifique se o link está correto.'); return; }
+  const o = rows[0];
+  const [{ data: pecas }, { data: clienteRows }] = await Promise.all([
+    sb.from('os_pecas').select('*').eq('os_id', o.id),
+    o.cliente_id ? sb.from('clientes').select('*').eq('id', o.cliente_id).limit(1) : Promise.resolve({data:[]}),
+  ]);
+  const cliente = (clienteRows||[])[0];
+  const st = osStatusInfo(o.status);
+  const valor = o.valor_final ? o.valor_final : o.valor_orcamento;
+  const subtotalPecas = (pecas||[]).reduce((s,p)=> s + Number(p.preco_unitario||0)*Number(p.quantidade||1), 0);
+  const podeResponder = o.status === 'aguardando_aprovacao';
+
+  contentEl.innerHTML = `
+    <div class="card">
+      <div class="doc-title">
+        <div>
+          <h1>Ordem de Serviço Nº ${o.numero}</h1>
+          <div class="muted">Aberta em ${fmtDate(o.data_entrada || o.created_at)}</div>
+        </div>
+        <span class="badge ${st.badge}"><span class="badge-dot"></span>${st.label}</span>
+      </div>
+      ${cliente ? `<div class="info-line" style="margin-top:10px;"><strong>Cliente:</strong> ${escapeHtml(cliente.nome)}</div>` : ''}
+      <div class="info-line"><strong>Aparelho:</strong> ${escapeHtml(o.marca||'')} ${escapeHtml(o.modelo||'')}</div>
+      ${o.defeito_relatado ? `<div class="info-line"><strong>Defeito relatado:</strong> ${escapeHtml(o.defeito_relatado)}</div>` : ''}
+      ${o.diagnostico ? `<div class="info-line"><strong>Diagnóstico:</strong> ${escapeHtml(o.diagnostico)}</div>` : ''}
+      ${o.servico_realizado ? `<div class="info-line"><strong>Serviço:</strong> ${escapeHtml(o.servico_realizado)}</div>` : ''}
+    </div>
+    ${(pecas&&pecas.length) ? `
+    <div class="card">
+      <div class="section-label">Peças / serviços</div>
+      <table>
+        <thead><tr><th>Item</th><th style="text-align:center;">Qtd.</th><th style="text-align:right;">Valor</th></tr></thead>
+        <tbody>${pecas.map(p=>`<tr><td>${escapeHtml(p.produto_nome)}</td><td style="text-align:center;">${p.quantidade}</td><td style="text-align:right;">${fmtMoney(Number(p.preco_unitario)*Number(p.quantidade))}</td></tr>`).join('')}</tbody>
+      </table>
+    </div>` : ''}
+    <div class="card">
+      <div class="totals" style="max-width:none;">
+        <div class="total"><span>Valor ${o.valor_final ? 'final' : 'orçado'}</span><span>${fmtMoney(valor)}</span></div>
+      </div>
+      ${o.garantia_dias ? `<div class="hint" style="margin-top:8px;">Garantia do serviço: ${o.garantia_dias} dias.</div>` : ''}
+    </div>
+    <div class="card" id="acaoCard">
+      ${podeResponder ? `
+        <div class="section-label">O que você deseja fazer?</div>
+        <div class="btnrow">
+          <button class="btn btn-primary" id="btnAprovar">Aprovar orçamento</button>
+          <button class="btn btn-danger" id="btnRecusar">Recusar</button>
+        </div>
+        <div class="hint">Ao aprovar, o técnico da UpTECH dará andamento ao reparo.</div>
+      ` : `<div class="hint" style="margin-top:0;">Não há aprovação pendente para esta ordem de serviço no momento.</div>`}
+    </div>
+    <div class="footer-note">UpTECH — Loja de celulares e computadores</div>
+  `;
+
+  const aprovarBtn = document.getElementById('btnAprovar');
+  const recusarBtn = document.getElementById('btnRecusar');
+  if(aprovarBtn){
+    aprovarBtn.addEventListener('click', async ()=>{
+      aprovarBtn.disabled = true; recusarBtn.disabled = true; aprovarBtn.textContent = 'Enviando...';
+      const { error: err2 } = await sb.from('ordens_servico').update({status:'em_andamento'}).eq('id', o.id);
+      const card = document.getElementById('acaoCard');
+      card.innerHTML = `<div class="section-label">O que você deseja fazer?</div>`;
+      if(err2){ feedback(card, false, 'Não foi possível enviar sua resposta agora. Tente novamente em instantes.'); }
+      else{ feedback(card, true, 'Aprovado! A UpTECH já vai dar andamento ao reparo.'); }
+    });
+  }
+  if(recusarBtn){
+    recusarBtn.addEventListener('click', async ()=>{
+      aprovarBtn.disabled = true; recusarBtn.disabled = true; recusarBtn.textContent = 'Enviando...';
+      const { error: err2 } = await sb.from('ordens_servico').update({status:'cancelado'}).eq('id', o.id);
+      const card = document.getElementById('acaoCard');
+      card.innerHTML = `<div class="section-label">O que você deseja fazer?</div>`;
+      if(err2){ feedback(card, false, 'Não foi possível enviar sua resposta agora. Tente novamente em instantes.'); }
+      else{ feedback(card, true, 'Tudo bem, orçamento recusado. Obrigado por avisar!'); }
+    });
+  }
+}
+
+(async function boot(){
+  if(SUPABASE_URL === 'SUPABASE_URL_AQUI'){
+    renderErro('Este link ainda não está ativo. A loja precisa concluir a configuração do sistema.');
+    return;
+  }
+  if(!sb){
+    renderErro('Não foi possível carregar esta página agora. Verifique sua conexão com a internet e tente novamente.');
+    return;
+  }
+  if(!id || (tipo!=='os' && tipo!=='orc')){
+    renderErro('Link inválido ou incompleto.');
+    return;
+  }
+  try{
+    if(tipo==='orc') await carregarOrcamento();
+    else await carregarOS();
+  }catch(e){
+    renderErro('Ocorreu um erro ao carregar este orçamento. Tente novamente em instantes.');
+  }
+})();
+</script>
+</body>
+</html>
