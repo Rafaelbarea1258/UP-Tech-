@@ -747,7 +747,6 @@ async function renderDashboard(){
     }catch(err){ console.error(err); toast('Erro ao concluir demanda: '+err.message, 'err'); btn.disabled = false; }
   });
 }
-
 /* ================= PDV (VENDAS) ================= */
 async function renderPDV(){
   const [produtos, clientes] = await Promise.all([sbSelect('produtos'), sbSelect('clientes')]);
@@ -1752,7 +1751,6 @@ function openProdutoForm(produto){
     finally{ btn.disabled=false; btn.textContent = isEdit?'Salvar alterações':'Cadastrar produto'; }
   });
 }
-
 /* ================= CLIENTES ================= */
 async function renderClientes(){
   const [clientes, vendas, os] = await Promise.all([sbSelect('clientes'), sbSelect('vendas'), sbSelect('ordens_servico')]);
@@ -1854,7 +1852,6 @@ function openClienteForm(cliente, onSaved, compact){
     finally{ btn.disabled=false; btn.textContent = isEdit?'Salvar alterações':'Cadastrar cliente'; }
   });
 }
-
 function exportarComprovanteGarantia(cliente, os){
   const win = window.open('', '_blank', 'width=850,height=1000');
   if(!win){ toast('Não foi possível abrir a janela de impressão — verifique o bloqueador de pop-ups do navegador.', 'err'); return; }
@@ -1924,7 +1921,6 @@ function exportarComprovanteGarantia(cliente, os){
   win.document.write(html);
   win.document.close();
 }
-
 async function openClienteHistorico(clienteId){
   const cliente = state.cache.clientes.find(c=>c.id===clienteId);
   const [{data: vendas}, {data: os}] = await Promise.all([
@@ -1973,7 +1969,6 @@ async function openClienteHistorico(clienteId){
     });
   });
 }
-
 /* ================= FINANCEIRO ================= */
 async function renderFinanceiro(){
   const financeiro = await sbSelect('financeiro_lancamentos');
@@ -2079,7 +2074,6 @@ function openLancamentoForm(){
     finally{ btn.disabled=false; btn.textContent='Salvar lançamento'; }
   });
 }
-
 /* ================= RELATÓRIOS ================= */
 async function renderRelatorios(){
   const [vendas, itensVenda, os, produtos] = await Promise.all([
