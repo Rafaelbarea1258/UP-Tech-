@@ -45,13 +45,16 @@ a{color:inherit;}
   background:var(--surface-1);width:360px;max-width:90vw;border-radius:14px;
   padding:36px 32px;box-shadow:0 20px 60px rgba(0,0,0,0.35);
 }
-.login-logo{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
+.login-logo{display:flex;align-items:center;justify-content:center;margin-bottom:14px;}
 .login-logo .mark{
   width:40px;height:40px;border-radius:10px;background:var(--brand);
   color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;
 }
 .login-logo .name{font-size:22px;font-weight:700;letter-spacing:-0.02em;}
-.login-sub{color:var(--text-secondary);font-size:13px;margin:0 0 24px;}
+.login-sub{color:var(--text-secondary);font-size:13px;margin:0 0 24px;text-align:center;}
+.logo-mark{object-fit:contain;}
+.login-footer{position:absolute;left:0;right:0;bottom:22px;display:flex;align-items:center;justify-content:center;gap:8px;color:rgba(255,255,255,0.65);font-size:12px;}
+.app-footer{display:flex;align-items:center;justify-content:center;gap:10px;padding:16px 20px;color:var(--muted);font-size:12px;border-top:1px solid var(--gridline);background:var(--surface-1);margin-top:auto;}
 .field{margin-bottom:14px;}
 .field label{display:block;font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;}
 .field input,.field select,.field textarea{
@@ -224,8 +227,7 @@ tbody tr:hover{background:#f9fafb;}
 <div id="loginScreen">
   <div class="login-card">
     <div class="login-logo">
-      <div class="mark">UT</div>
-      <div class="name">UpTECH</div>
+      <img class="logo-mark" alt="UP TECH" style="height:72px;width:auto;border-radius:14px;">
     </div>
     <p class="login-sub">Sistema de gestão da loja</p>
     <form id="loginForm">
@@ -241,13 +243,17 @@ tbody tr:hover{background:#f9fafb;}
       <div id="loginError"></div>
     </form>
   </div>
+  <div class="login-footer">
+    <img class="logo-mark" alt="UP TECH" style="height:18px;width:auto;border-radius:5px;">
+    <span>UP TECH Soluções em sistema para empresas</span>
+  </div>
 </div>
 
 <!-- ================= APP ================= -->
 <div id="app">
   <div class="shell">
     <aside class="sidebar">
-      <div class="brand"><div class="mark">UT</div><div class="name">UpTECH</div></div>
+      <div class="brand"><img class="logo-mark" alt="UP TECH" style="height:38px;width:auto;border-radius:8px;"></div>
       <div class="navgroup">
         <div class="label">Visão geral</div>
         <div class="navitem" data-view="dashboard"><span class="ico">&#9673;</span> Dashboard</div>
@@ -285,6 +291,10 @@ tbody tr:hover{background:#f9fafb;}
         </div>
       </div>
       <div class="content" id="content"></div>
+      <footer class="app-footer">
+        <img class="logo-mark" alt="UP TECH" style="height:20px;width:auto;border-radius:5px;">
+        <span>UP TECH Soluções em sistema para empresas</span>
+      </footer>
     </div>
   </div>
 </div>
@@ -303,6 +313,16 @@ tbody tr:hover{background:#f9fafb;}
 const SUPABASE_URL = "https://wcchaejzblaerhndkkym.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_uk8FFRvd9A-8jZ_Pf80lfg_z8372CXq";
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* ---------------- Logo UP TECH ---------------- */
+const LOGO_URI = "data:image/webp;base64,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";
+
+document.addEventListener('DOMContentLoaded', function(){
+  document.querySelectorAll('.logo-mark').forEach(function(img){ img.src = LOGO_URI; });
+});
+if(document.readyState !== 'loading'){
+  document.querySelectorAll('.logo-mark').forEach(function(img){ img.src = LOGO_URI; });
+}
 
 const state = {
   user: null,
@@ -747,6 +767,7 @@ async function renderDashboard(){
     }catch(err){ console.error(err); toast('Erro ao concluir demanda: '+err.message, 'err'); btn.disabled = false; }
   });
 }
+
 /* ================= PDV (VENDAS) ================= */
 async function renderPDV(){
   const [produtos, clientes] = await Promise.all([sbSelect('produtos'), sbSelect('clientes')]);
@@ -1751,6 +1772,7 @@ function openProdutoForm(produto){
     finally{ btn.disabled=false; btn.textContent = isEdit?'Salvar alterações':'Cadastrar produto'; }
   });
 }
+
 /* ================= CLIENTES ================= */
 async function renderClientes(){
   const [clientes, vendas, os] = await Promise.all([sbSelect('clientes'), sbSelect('vendas'), sbSelect('ordens_servico')]);
@@ -1852,6 +1874,7 @@ function openClienteForm(cliente, onSaved, compact){
     finally{ btn.disabled=false; btn.textContent = isEdit?'Salvar alterações':'Cadastrar cliente'; }
   });
 }
+
 function exportarComprovanteGarantia(cliente, os){
   const win = window.open('', '_blank', 'width=850,height=1000');
   if(!win){ toast('Não foi possível abrir a janela de impressão — verifique o bloqueador de pop-ups do navegador.', 'err'); return; }
@@ -1921,6 +1944,7 @@ function exportarComprovanteGarantia(cliente, os){
   win.document.write(html);
   win.document.close();
 }
+
 async function openClienteHistorico(clienteId){
   const cliente = state.cache.clientes.find(c=>c.id===clienteId);
   const [{data: vendas}, {data: os}] = await Promise.all([
@@ -1969,6 +1993,7 @@ async function openClienteHistorico(clienteId){
     });
   });
 }
+
 /* ================= FINANCEIRO ================= */
 async function renderFinanceiro(){
   const financeiro = await sbSelect('financeiro_lancamentos');
@@ -2074,6 +2099,7 @@ function openLancamentoForm(){
     finally{ btn.disabled=false; btn.textContent='Salvar lançamento'; }
   });
 }
+
 /* ================= RELATÓRIOS ================= */
 async function renderRelatorios(){
   const [vendas, itensVenda, os, produtos] = await Promise.all([
