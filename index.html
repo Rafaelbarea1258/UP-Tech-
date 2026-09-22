@@ -25,12 +25,8 @@
   --good: #0ca30c;
   --warning: #fab219;
   --serious: #ec835a;
-  --critical: #d03b3b;
-  --diverging-in: #2a78d6;
   --diverging-out: #e34948;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
-*{box-sizing:border-box;}
 html,body{margin:0;padding:0;height:100%;background:var(--page-bg);color:var(--text-primary);}
 button{font-family:inherit;cursor:pointer;}
 input,select,textarea{font-family:inherit;}
@@ -45,7 +41,7 @@ a{color:inherit;}
   background:var(--surface-1);width:360px;max-width:90vw;border-radius:14px;
   padding:36px 32px;box-shadow:0 20px 60px rgba(0,0,0,0.35);
 }
-.login-logo{display:flex;align-items:center;justify-content:center;margin-bottom:14px;}
+.login-logo{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:14px;}
 .login-logo .mark{
   width:40px;height:40px;border-radius:10px;background:var(--brand);
   color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;
@@ -227,7 +223,7 @@ tbody tr:hover{background:#f9fafb;}
 <div id="loginScreen">
   <div class="login-card">
     <div class="login-logo">
-      <img class="logo-mark" alt="UP TECH" style="height:72px;width:auto;border-radius:14px;">
+      <img class="logo-mark" alt="UP TECH" style="height:72px;width:auto;border-radius:14px;"><span class="name">UpTECH</span>
     </div>
     <p class="login-sub">Sistema de gestão da loja</p>
     <form id="loginForm">
@@ -253,7 +249,7 @@ tbody tr:hover{background:#f9fafb;}
 <div id="app">
   <div class="shell">
     <aside class="sidebar">
-      <div class="brand"><img class="logo-mark" alt="UP TECH" style="height:38px;width:auto;border-radius:8px;"></div>
+      <div class="brand"><img class="logo-mark" alt="UP TECH" style="height:38px;width:auto;border-radius:8px;"><span class="name">UpTECH</span></div>
       <div class="navgroup">
         <div class="label">Visão geral</div>
         <div class="navitem" data-view="dashboard"><span class="ico">&#9673;</span> Dashboard</div>
@@ -2098,6 +2094,8 @@ function openLancamentoForm(){
     }catch(err){ console.error(err); toast('Erro: '+err.message, 'err'); }
     finally{ btn.disabled=false; btn.textContent='Salvar lançamento'; }
   });
+
+
 }
 
 /* ================= RELATÓRIOS ================= */
@@ -2109,6 +2107,20 @@ async function renderRelatorios(){
   const faturamentoTotal = vendasConcluidas.reduce((s,v)=>s+Number(v.total||0),0);
   const ticketMedio = vendasConcluidas.length ? faturamentoTotal/vendasConcluidas.length : 0;
   const osConcluidas = os.filter(o=>['concluido','entregue'].includes(o.status));
+  const vendaIdsConcluidas = new Set(vendasConcluidas.map(v=>v.id));
+  const produtosPorId = {};
+  produtos.forEach(p=>{ produtosPorId[p.id] = p; });
+  let custoTotalVendido = 0;
+  let receitaItensComCusto = 0;
+  itensVenda.forEach(i=>{
+    if(!vendaIdsConcluidas.has(i.venda_id)) return;
+    const p = produtosPorId[i.produto_id];
+    const custoUnit = p ? Number(p.custo||0) : 0;
+    custoTotalVendido += custoUnit * Number(i.quantidade||0);
+    receitaItensComCusto += Number(i.subtotal||0);
+  });
+  const lucroVendas = receitaItensComCusto - custoTotalVendido;
+  const margemPct = receitaItensComCusto>0 ? (lucroVendas/receitaItensComCusto*100) : 0;
 
   const now = new Date();
   const days = [];
@@ -2127,6 +2139,12 @@ async function renderRelatorios(){
       <div class="card stat-tile"><div class="stat-label">Ticket médio</div><div class="stat-value">${fmtMoney(ticketMedio)}</div></div>
       <div class="card stat-tile"><div class="stat-label">OS concluídas</div><div class="stat-value">${osConcluidas.length}</div></div>
       <div class="card stat-tile"><div class="stat-label">Total de OS</div><div class="stat-value">${os.length}</div></div>
+    </div>
+   <div class="card" style="margin-bottom:18px;background:#f4faf4;border-color:#cdeacd;">
+      <div class="stat-label">Lucro das vendas <span class="stat-icon" style="background:#e7f8e7;color:var(--good);">&#128176;</span></div>
+      <div class="stat-value" style="color:var(--good);">${fmtMoney(lucroVendas)}</div>
+      <div class="stat-delta">Receita dos itens vendidos: ${fmtMoney(receitaItensComCusto)} &middot; Custo dos produtos: ${fmtMoney(custoTotalVendido)} &middot; Margem: ${margemPct.toFixed(1)}%</div>
+      <div class="hint">Calculado com base no custo cadastrado atualmente no estoque de cada produto vendido. Não inclui despesas gerais (aluguel, contas etc.) nem OS.</div>
     </div>
     <div class="grid grid-2">
       <div class="card">
