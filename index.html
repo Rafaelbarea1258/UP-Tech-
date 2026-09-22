@@ -1671,6 +1671,7 @@ function precoCalcHtml(produto){
     </label>
     <div id="pPrecoBreakdown" style="font-size:12.5px;color:var(--text-secondary);line-height:1.7;"></div>
     <div style="margin-top:10px;font-weight:700;font-size:17px;">Preço de venda: <span id="pPrecoFinal">R$ 0,00</span></div>
+      <div style="margin-top:4px;font-size:13px;color:var(--good);">Lucro estimado: <span id="pPrecoLucro">R$ 0,00</span></div>
     <div class="hint">${produto ? `Preço cadastrado atualmente: ${fmtMoney(precoAtual)}. Ajuste os campos acima para recalcular.` : 'Calculado automaticamente: custo × multiplicador, mais a taxa da maquininha e o frete (se houver), menos o desconto.'}</div>
     <input type="hidden" id="pPreco" value="${precoAtual}">
   </div>`;
@@ -1684,6 +1685,7 @@ function wirePrecoCalc(){
   const descontoEl = document.getElementById('pPrecoDesconto');
   const breakdownEl = document.getElementById('pPrecoBreakdown');
   const finalEl = document.getElementById('pPrecoFinal');
+      const lucroEl = document.getElementById('pPrecoLucro');
   const hiddenEl = document.getElementById('pPreco');
   if(!custoEl) return;
   function calc(){
@@ -1702,6 +1704,7 @@ function wirePrecoCalc(){
       + (frete>0 ? `+ Frete: ${fmtMoney(frete)}<br>` : '')
       + (descontoPct>0 ? `- Desconto (${descontoPct}%): -${fmtMoney(descontoValor)}<br>` : '');
     finalEl.textContent = fmtMoney(total);
+      if(lucroEl) lucroEl.textContent = fmtMoney(total - custo);
     hiddenEl.value = total.toFixed(2);
     return total;
   }
