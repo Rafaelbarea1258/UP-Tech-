@@ -1124,6 +1124,25 @@ async function renderOrcamentos(){
   document.getElementById('orcDesconto').addEventListener('input', updateTotal);
   renderCart();
 
+  if(state.orcEditId){
+    const meta = state.orcEditMeta || {};
+    document.getElementById('orcSalvar').textContent = 'Salvar alterações';
+    const cardEl = document.querySelector('#content .card');
+    if(cardEl) cardEl.insertAdjacentHTML('afterbegin', '<div id="orcEditBanner" style="margin-bottom:12px;padding:10px 14px;background:#fff8e1;border:1px solid #ffca28;border-radius:8px;display:flex;justify-content:space-between;align-items:center;font-size:13.5px;"><span>Editando orçamento #' + (meta.numero||'') + '</span><a href="#" id="orcCancelarEdicao" style="color:var(--critical);font-weight:600;">Cancelar edição</a></div>');
+    if(meta.desconto) document.getElementById('orcDesconto').value = meta.desconto;
+    if(meta.validade) document.getElementById('orcValidade').value = meta.validade;
+    if(meta.clienteId) selectOrcCliente(meta.clienteId);
+    updateTotal();
+    const cancelarLink = document.getElementById('orcCancelarEdicao');
+    if(cancelarLink) cancelarLink.addEventListener('click', (e)=>{
+      e.preventDefault();
+      state.orcCart = [];
+      state.orcEditId = null;
+      state.orcEditMeta = null;
+      navigate('orcamentos');
+    });
+  }
+
   function renderClienteResults(list){
     const el = document.getElementById('orcClienteResults');
     if(!list.length){ el.innerHTML = `<div style="padding:12px;color:var(--muted);font-size:13px;">Nenhum cliente encontrado.</div>`; }
@@ -1170,29 +1189,50 @@ async function renderOrcamentos(){
   document.getElementById('orcSalvar').addEventListener('click', async ()=>{
     if(!state.orcCart.length){ toast('Adicione ao menos um produto ao orçamento', 'err'); return; }
     const btn = document.getElementById('orcSalvar');
-    btn.disabled = true; btn.textContent = 'Salvando...';
+    btn.disabled = true; btn.textContent = state.orcEditId ? 'Salvando alterações...' : 'Salvando...';
     try{
       const subtotal = state.orcCart.reduce((s,i)=> s + i.preco_unitario*i.quantidade, 0);
       const desconto = Number(document.getElementById('orcDesconto').value)||0;
       const total = Math.max(0, subtotal-desconto);
-      const { data: rows, error } = await sb.from('orcamentos').insert({
-        cliente_id: document.getElementById('orcClienteId').value || null,
-        usuario_id: state.user.id, desconto, total,
-        validade_dias: Number(document.getElementById('orcValidade').value)||7,
-        status: 'aberto'
-      }).select();
-      if(error) throw error;
-      const orc = rows[0];
-      const itens = state.orcCart.map(i=>({
-        orcamento_id: orc.id, produto_id: i.produto_id, produto_nome: i.nome,
-        quantidade: i.quantidade, preco_unitario: i.preco_unitario, subtotal: i.preco_unitario*i.quantidade
-      }));
-      await sb.from('orcamento_itens').insert(itens);
-      toast('Orçamento #'+orc.numero+' salvo!', 'ok');
-      state.orcCart = [];
-      navigate('orcamentos');
+      const clienteId = document.getElementById('orcClienteId').value || null;
+      const validadeDias = Number(document.getElementById('orcValidade').value)||7;
+      if(state.orcEditId){
+        const orcId = state.orcEditId;
+        const { error } = await sb.from('orcamentos').update({
+          cliente_id: clienteId, desconto, total, validade_dias: validadeDias
+        }).eq('id', orcId);
+        if(error) throw error;
+        await sb.from('orcamento_itens').delete().eq('orcamento_id', orcId);
+        const itens = state.orcCart.map(i=>({
+          orcamento_id: orcId, produto_id: i.produto_id, produto_nome: i.nome,
+          quantidade: i.quantidade, preco_unitario: i.preco_unitario, subtotal: i.preco_unitario*i.quantidade
+        }));
+        await sb.from('orcamento_itens').insert(itens);
+        toast('Orçamento atualizado!', 'ok');
+        state.orcCart = [];
+        state.orcEditId = null;
+        state.orcEditMeta = null;
+        navigate('orcamentos');
+      } else {
+        const { data: rows, error } = await sb.from('orcamentos').insert({
+          cliente_id: clienteId,
+          usuario_id: state.user.id, desconto, total,
+          validade_dias: validadeDias,
+          status: 'aberto'
+        }).select();
+        if(error) throw error;
+        const orc = rows[0];
+        const itens = state.orcCart.map(i=>({
+          orcamento_id: orc.id, produto_id: i.produto_id, produto_nome: i.nome,
+          quantidade: i.quantidade, preco_unitario: i.preco_unitario, subtotal: i.preco_unitario*i.quantidade
+        }));
+        await sb.from('orcamento_itens').insert(itens);
+        toast('Orçamento #'+orc.numero+' salvo!', 'ok');
+        state.orcCart = [];
+        navigate('orcamentos');
+      }
     }catch(err){ console.error(err); toast('Erro ao salvar orçamento: '+err.message, 'err'); }
-    finally{ btn.disabled = false; btn.textContent = 'Salvar orçamento'; }
+    finally{ btn.disabled = false; btn.textContent = state.orcEditId ? 'Salvar alterações' : 'Salvar orçamento'; }
   });
 }
 
@@ -1292,6 +1332,7 @@ async function openOrcamentoDetail(orcId){
       <button class="btn btn-secondary" id="orcCopiarBtn">Copiar resumo</button>
       <button class="btn btn-secondary" id="orcLinkBtn">Copiar link para o cliente</button>
       <button class="btn btn-secondary" id="orcExportarBtn">Exportar / Imprimir</button>
+      ${['aberto','aprovado'].includes(o.status) ? `<button class="btn btn-secondary" id="orcEditarBtn">Editar orçamento</button>` : ''}
       ${['aberto','aprovado'].includes(o.status) ? `<button class="btn btn-primary" id="orcConverterBtn">Converter em venda</button>` : ''}
     </div>
   `);
@@ -1320,6 +1361,14 @@ async function openOrcamentoDetail(orcId){
     await sb.from('orcamentos').update({status:'recusado'}).eq('id', orcId);
     toast('Orçamento marcado como recusado', 'ok');
     closeModal(); navigate('orcamentos');
+  });
+  const editarBtn = document.getElementById('orcEditarBtn');
+  if(editarBtn) editarBtn.addEventListener('click', ()=>{
+    state.orcCart = (itens||[]).map(i=>({produto_id:i.produto_id, nome:i.produto_nome, preco_unitario:Number(i.preco_unitario), quantidade:i.quantidade}));
+    state.orcEditId = orcId;
+    state.orcEditMeta = { clienteId: o.cliente_id, desconto: o.desconto, validade: o.validade_dias, numero: o.numero };
+    closeModal();
+    navigate('orcamentos');
   });
   const converterBtn = document.getElementById('orcConverterBtn');
   if(converterBtn) converterBtn.addEventListener('click', async ()=>{
