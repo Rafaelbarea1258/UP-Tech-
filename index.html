@@ -215,6 +215,45 @@ tbody tr:hover{background:#f9fafb;}
 .spinner{width:20px;height:20px;border:2px solid var(--gridline);border-top-color:var(--brand);border-radius:50%;animation:spin .7s linear infinite;margin:30px auto;}
 @keyframes spin{to{transform:rotate(360deg);}}
 .help-note{background:var(--brand-bg);border:1px solid #cfe0f7;border-radius:10px;padding:14px 16px;font-size:13px;color:var(--brand-dark);margin-bottom:16px;}
+
+/* ---------- RESPONSIVE (tablet & celular) ---------- */
+.mobile-only{display:none;}
+.sidebar-backdrop{position:fixed;inset:0;background:rgba(10,15,25,0.5);z-index:59;display:none;}
+.sidebar-backdrop.open{display:block;}
+@media (max-width:960px){
+  .sidebar{position:fixed;top:0;left:0;z-index:60;height:100vh;transform:translateX(-100%);transition:transform .25s ease;box-shadow:0 0 40px rgba(0,0,0,0.3);}
+  .sidebar.open{transform:translateX(0);}
+  .mobile-only{display:inline-flex;}
+  .topbar{padding:12px 16px;}
+  .topbar h1{font-size:17px;}
+  .content{padding:16px 16px 50px;}
+}
+@media (max-width:680px){
+  .row-flex{flex-direction:column;}
+  .grid-4,.grid-3,.grid-2{grid-template-columns:1fr;}
+  .topbar{padding:10px 14px;}
+  .topbar h1{font-size:16px;}
+  .topbar .sub{font-size:11.5px;}
+  .content{padding:12px 12px 44px;}
+  .card{padding:14px;}
+  .modal{width:100%;max-height:100vh;border-radius:0;}
+  .modal-overlay{padding:0;align-items:flex-end;}
+  .modal-header{padding:14px 16px;}
+  .modal-body{padding:14px 16px;}
+  .modal-footer{padding:12px 16px;flex-wrap:wrap;}
+  .modal-footer .btn{flex:1;min-width:120px;}
+  table{font-size:12.5px;}
+  thead th{padding:7px 8px;}
+  tbody td{padding:9px 8px;}
+  .bar-row .lbl{width:80px;}
+  .kanban{grid-auto-flow:column;grid-template-columns:none;}
+  .kanban-col{min-width:78vw;}
+  .section-head h2{font-size:15px;}
+  .stat-tile .stat-value{font-size:22px;}
+}
+@media (max-width:420px){
+  .login-card{padding:26px 20px;}
+}
 </style>
 </head>
 <body>
@@ -276,11 +315,15 @@ tbody tr:hover{background:#f9fafb;}
         <button class="btn btn-ghost btn-block btn-sm" id="logoutBtn" style="color:#fff;border:1px solid rgba(255,255,255,0.15);">Sair</button>
       </div>
     </aside>
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
     <div class="main">
       <div class="topbar">
-        <div>
-          <h1 id="pageTitle">Dashboard</h1>
-          <div class="sub" id="pageSub">Visão geral da loja</div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button class="btn btn-ghost btn-sm mobile-only" id="menuToggleBtn" aria-label="Abrir menu" style="font-size:16px;padding:6px 10px;">&#9776;</button>
+          <div>
+            <h1 id="pageTitle">Dashboard</h1>
+            <div class="sub" id="pageSub">Visão geral da loja</div>
+          </div>
         </div>
         <div class="toolbar">
           <button class="btn btn-secondary btn-sm" id="refreshBtn">&#8635; Atualizar</button>
@@ -594,7 +637,21 @@ const VIEW_META = {
 };
 
 document.querySelectorAll('.navitem').forEach(el=>{
-  el.addEventListener('click', ()=> navigate(el.dataset.view));
+  el.addEventListener('click', ()=>{
+    navigate(el.dataset.view);
+    document.querySelector('.sidebar').classList.remove('open');
+    document.getElementById('sidebarBackdrop').classList.remove('open');
+  });
+});
+const menuToggleBtn = document.getElementById('menuToggleBtn');
+const sidebarBackdrop = document.getElementById('sidebarBackdrop');
+if(menuToggleBtn) menuToggleBtn.addEventListener('click', ()=>{
+  document.querySelector('.sidebar').classList.toggle('open');
+  sidebarBackdrop.classList.toggle('open');
+});
+if(sidebarBackdrop) sidebarBackdrop.addEventListener('click', ()=>{
+  document.querySelector('.sidebar').classList.remove('open');
+  sidebarBackdrop.classList.remove('open');
 });
 document.getElementById('refreshBtn').addEventListener('click', ()=> navigate(state.view, true));
 
