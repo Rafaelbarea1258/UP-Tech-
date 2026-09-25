@@ -1122,10 +1122,21 @@ async function renderOrcamentos(){
       <td>${fmtDate(localDateStr(venc))}</td>
       <td>${fmtMoney(o.total)}</td>
       <td><span class="badge ${st.badge}"><span class="badge-dot"></span>${st.label}</span></td>
-      <td style="text-align:right;white-space:nowrap;"><button class="btn btn-ghost btn-sm" data-orc="${o.id}">Ver</button></td>
+      <td style="text-align:right;white-space:nowrap;">
+      <button class="btn btn-ghost btn-sm" data-orc="${o.id}">Ver</button>
+      <button class="btn btn-ghost btn-sm" data-orc-edit="${o.id}">Editar</button>
+      <button class="btn btn-ghost btn-sm" data-orc-del="${o.id}" style="color:var(--critical)">Excluir</button>
+    </td>
     </tr>`;
   }).join('') : `<tr class="empty-row"><td colspan="7">Nenhum orçamento registrado ainda.</td></tr>`;
   orcBody.querySelectorAll('[data-orc]').forEach(b=>b.addEventListener('click', ()=> openOrcamentoDetail(b.dataset.orc)));
+  orcBody.querySelectorAll('[data-orc-edit]').forEach(b=>b.addEventListener('click', ()=> editarOrcamentoRapido(b.dataset.orcEdit)));
+  orcBody.querySelectorAll('[data-orc-del]').forEach(b=>b.addEventListener('click', async ()=>{
+    if(!confirm('Excluir este orçamento? Essa ação não pode ser desfeita.')) return;
+    await sb.from('orcamentos').delete().eq('id', b.dataset.orcDel);
+    toast('Orçamento excluído', 'ok');
+    navigate('orcamentos');
+  }));
 
   function renderResults(list){
     const el = document.getElementById('orcResults');
@@ -1472,12 +1483,24 @@ async function openOrcamentoDetail(orcId){
       await sb.from('orcamentos').update({status:'convertido'}).eq('id', orcId);
       toast('Orçamento convertido na venda #'+venda.numero+'!', 'ok');
       closeModal();
-      navigate('orcamentos');
+      navigate('vendas');
     }catch(err){
       console.error(err); toast('Erro ao converter: '+err.message, 'err');
       converterBtn.disabled = false; converterBtn.textContent = 'Converter em venda';
     }
   });
+}
+
+async function editarOrcamentoRapido(orcId){
+  const { data } = await sb.from('orcamentos').select('*').eq('id', orcId).limit(1);
+  const o = (data||[])[0];
+  if(!o){ toast('Orçamento não encontrado', 'err'); return; }
+  if(!['aberto','aprovado'].includes(o.status)){ toast('Este orçamento não pode mais ser editado', 'err'); return; }
+  const { data: itens } = await sb.from('orcamento_itens').select('*').eq('orcamento_id', orcId);
+  state.orcCart = (itens||[]).map(i=>({produto_id:i.produto_id, nome:i.produto_nome, preco_unitario:Number(i.preco_unitario), quantidade:i.quantidade}));
+  state.orcEditId = orcId;
+  state.orcEditMeta = { clienteId: o.cliente_id, desconto: o.desconto, validade: o.validade_dias, numero: o.numero };
+  navigate('orcamentos');
 }
 
 /* ================= ORDENS DE SERVIÇO ================= */
