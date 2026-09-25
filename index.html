@@ -682,8 +682,8 @@ async function navigate(view, force=false){
 
 /* ================= DASHBOARD ================= */
 async function renderDashboard(){
-  const [produtos, vendas, os, financeiro, tarefas] = await Promise.all([
-    sbSelect('produtos'), sbSelect('vendas'), sbSelect('ordens_servico'), sbSelect('financeiro_lancamentos'), sbSelect('tarefas'),
+  const [produtos, vendas, os, financeiro, tarefas, itensVenda] = await Promise.all([
+    sbSelect('produtos'), sbSelect('vendas'), sbSelect('ordens_servico'), sbSelect('financeiro_lancamentos'), sbSelect('tarefas'), sbSelect('itens_venda'),
   ]);
   state.cache.produtos = produtos; state.cache.vendas = vendas; state.cache.os = os; state.cache.financeiro = financeiro;
   state.cache.tarefas = tarefas;
@@ -702,6 +702,17 @@ async function renderDashboard(){
     .reduce((s,f)=> s + Number(f.valor||0), 0);
 
   const recentVendas = vendas.slice(0,5);
+    const produtosPorId = {};
+    produtos.forEach(p=>{ produtosPorId[p.id] = p; });
+    const custoLucroPorVenda = {};
+    recentVendas.forEach(v=>{
+      let custo = 0;
+      itensVenda.filter(i=>i.venda_id===v.id).forEach(i=>{
+        const p = produtosPorId[i.produto_id];
+        custo += (p ? Number(p.custo||0) : 0) * Number(i.quantidade||0);
+      });
+      custoLucroPorVenda[v.id] = { custo, lucro: Number(v.total||0) - custo };
+    });
   const recentOS = os.slice(0,5);
 
   const tarefasPendentes = tarefas.filter(t=>!t.concluida).slice().reverse();
@@ -747,8 +758,8 @@ async function renderDashboard(){
     <div class="grid grid-2">
       <div class="card">
         <div class="section-head"><h2>Vendas recentes</h2></div>
-        ${recentVendas.length ? `<table><thead><tr><th>#</th><th>Data</th><th>Total</th><th>Pagamento</th></tr></thead><tbody>
-          ${recentVendas.map(v=>`<tr><td>#${v.numero}</td><td>${fmtDateTime(v.created_at)}</td><td>${fmtMoney(v.total)}</td><td style="text-transform:capitalize">${escapeHtml(v.forma_pagamento||'-')}</td></tr>`).join('')}
+        ${recentVendas.length ? `<table><thead><tr><th>#</th><th>Data</th><th>Total</th><th>Custo</th><th>Lucro</th><th>Pagamento</th></tr></thead><tbody>
+          ${recentVendas.map(v=>{ const cl = custoLucroPorVenda[v.id]||{custo:0,lucro:0}; return `<tr><td>#${v.numero}</td><td>${fmtDateTime(v.created_at)}</td><td>${fmtMoney(v.total)}</td><td>${fmtMoney(cl.custo)}</td><td style="color:var(--good);font-weight:600;">${fmtMoney(cl.lucro)}</td><td style="text-transform:capitalize">${escapeHtml(v.forma_pagamento||'-')}</td></tr>`; }).join('')}
         </tbody></table>` : `<div class="empty-state">Nenhuma venda registrada ainda.</div>`}
       </div>
       <div class="card">
