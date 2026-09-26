@@ -2306,60 +2306,213 @@ async function renderRelatorios(){
   const [vendas, itensVenda, os, produtos] = await Promise.all([
     sbSelect('vendas'), sbSelect('itens_venda'), sbSelect('ordens_servico'), sbSelect('produtos'),
   ]);
-  const vendasConcluidas = vendas.filter(v=>v.status!=='cancelada');
-  const faturamentoTotal = vendasConcluidas.reduce((s,v)=>s+Number(v.total||0),0);
-  const ticketMedio = vendasConcluidas.length ? faturamentoTotal/vendasConcluidas.length : 0;
-  const osConcluidas = os.filter(o=>['concluido','entregue'].includes(o.status));
-  const vendaIdsConcluidas = new Set(vendasConcluidas.map(v=>v.id));
   const produtosPorId = {};
   produtos.forEach(p=>{ produtosPorId[p.id] = p; });
-  let custoTotalVendido = 0;
-  let receitaItensComCusto = 0;
-  itensVenda.forEach(i=>{
-    if(!vendaIdsConcluidas.has(i.venda_id)) return;
-    const p = produtosPorId[i.produto_id];
-    const custoUnit = p ? Number(p.custo||0) : 0;
-    custoTotalVendido += custoUnit * Number(i.quantidade||0);
-    receitaItensComCusto += Number(i.subtotal||0);
-  });
-  const lucroVendas = receitaItensComCusto - custoTotalVendido;
-  const margemPct = receitaItensComCusto>0 ? (lucroVendas/receitaItensComCusto*100) : 0;
 
-  const now = new Date();
-  const days = [];
-  for(let i=6;i>=0;i--){ const d = new Date(now); d.setDate(now.getDate()-i); days.push(localDateStr(d)); }
-  const vendasPorDia = days.map(d=>({d, total: vendasConcluidas.filter(v=>v.created_at && localDateStr(v.created_at)===d).reduce((s,v)=>s+Number(v.total||0),0)}));
-  const maxDia = Math.max(1, ...vendasPorDia.map(v=>v.total));
-
-  const produtoQtd = {};
-  itensVenda.forEach(i=>{ produtoQtd[i.produto_nome||i.produto_id] = (produtoQtd[i.produto_nome||i.produto_id]||0) + i.quantidade; });
-  const topProdutos = Object.entries(produtoQtd).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  const maxProd = Math.max(1, ...topProdutos.map(p=>p[1]));
+  function periodoRange(tipo){
+    const hoje = new Date(); hoje.setHours(0,0,0,0);
+    let de=null, ate=null;
+    if(tipo==='mes'){ de = new Date(hoje.getFullYear(), hoje.getMonth(), 1); ate = new Date(hoje.getFullYear(), hoje.getMonth()+1, 0); }
+    else if(tipo==='mes_passado'){ de = new Date(hoje.getFullYear(), hoje.getMonth()-1, 1); ate = new Date(hoje.getFullYear(), hoje.getMonth(), 0); }
+    else if(tipo==='7dias'){ de = new Date(hoje); de.setDate(de.getDate()-6); ate = hoje; }
+    else if(tipo==='30dias'){ de = new Date(hoje); de.setDate(de.getDate()-29); ate = hoje; }
+    return { de: de?localDateStr(de):null, ate: ate?localDateStr(ate):null };
+  }
+  const periodoLabels = {mes:'Este mês', mes_passado:'Mês passado', '7dias':'Últimos 7 dias', '30dias':'Últimos 30 dias', tudo:'Todo o período', custom:'Personalizado'};
 
   document.getElementById('content').innerHTML = `
-    <div class="grid grid-4" style="margin-bottom:18px;">
-      <div class="card stat-tile"><div class="stat-label">Faturamento total (vendas)</div><div class="stat-value">${fmtMoney(faturamentoTotal)}</div></div>
-      <div class="card stat-tile"><div class="stat-label">Ticket médio</div><div class="stat-value">${fmtMoney(ticketMedio)}</div></div>
-      <div class="card stat-tile"><div class="stat-label">OS concluídas</div><div class="stat-value">${osConcluidas.length}</div></div>
-      <div class="card stat-tile"><div class="stat-label">Total de OS</div><div class="stat-value">${os.length}</div></div>
-    </div>
-   <div class="card" style="margin-bottom:18px;background:#f4faf4;border-color:#cdeacd;">
-      <div class="stat-label">Lucro das vendas <span class="stat-icon" style="background:#e7f8e7;color:var(--good);">&#128176;</span></div>
-      <div class="stat-value" style="color:var(--good);">${fmtMoney(lucroVendas)}</div>
-      <div class="stat-delta">Receita dos itens vendidos: ${fmtMoney(receitaItensComCusto)} &middot; Custo dos produtos: ${fmtMoney(custoTotalVendido)} &middot; Margem: ${margemPct.toFixed(1)}%</div>
-      <div class="hint">Calculado com base no custo cadastrado atualmente no estoque de cada produto vendido. Não inclui despesas gerais (aluguel, contas etc.) nem OS.</div>
-    </div>
-    <div class="grid grid-2">
-      <div class="card">
-        <div class="section-head"><h2>Vendas por dia (últimos 7 dias)</h2></div>
-        ${vendasPorDia.map(v=>`<div class="bar-row"><div class="lbl">${fmtDate(v.d)}</div><div class="track"><div class="fill" style="width:${(v.total/maxDia*100)}%"></div></div><div class="val">${fmtMoney(v.total)}</div></div>`).join('')}
+    <div class="card" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+      <div class="field" style="margin:0;min-width:160px;">
+        <label>Período</label>
+        <select id="relPeriodo">
+          <option value="mes">Este mês</option>
+          <option value="mes_passado">Mês passado</option>
+          <option value="7dias">Últimos 7 dias</option>
+          <option value="30dias">Últimos 30 dias</option>
+          <option value="tudo">Todo o período</option>
+          <option value="custom">Personalizado</option>
+        </select>
       </div>
-      <div class="card">
-        <div class="section-head"><h2>Produtos mais vendidos</h2></div>
-        ${topProdutos.length ? topProdutos.map(([nome,qtd])=>`<div class="bar-row"><div class="lbl">${escapeHtml(nome)}</div><div class="track"><div class="fill" style="width:${(qtd/maxProd*100)}%;background:var(--brand)"></div></div><div class="val">${qtd} un.</div></div>`).join('') : '<div class="empty-state" style="padding:20px;">Ainda sem vendas suficientes.</div>'}
+      <div class="field" id="relDeWrap" style="margin:0;display:none;">
+        <label>De</label>
+        <input type="date" id="relDe">
       </div>
+      <div class="field" id="relAteWrap" style="margin:0;display:none;">
+        <label>Até</label>
+        <input type="date" id="relAte">
+      </div>
+      <button class="btn btn-secondary btn-sm" id="relExportCsvBtn">Exportar CSV</button>
+      <button class="btn btn-secondary btn-sm" id="relImprimirBtn">Exportar / Imprimir</button>
     </div>
+    <div id="relBody"></div>
   `;
+
+  const periodoSel = document.getElementById('relPeriodo');
+  const deInput = document.getElementById('relDe');
+  const ateInput = document.getElementById('relAte');
+  const deWrap = document.getElementById('relDeWrap');
+  const ateWrap = document.getElementById('relAteWrap');
+
+  let vendasFiltradas = [];
+  let periodoLabelAtual = '';
+
+  function draw(){
+    const tipo = periodoSel.value;
+    let de, ate;
+    if(tipo==='custom'){
+      deWrap.style.display='flex'; ateWrap.style.display='flex';
+      de = deInput.value || null; ate = ateInput.value || null;
+    } else {
+      deWrap.style.display='none'; ateWrap.style.display='none';
+      const r = periodoRange(tipo);
+      de = r.de; ate = r.ate;
+    }
+    periodoLabelAtual = periodoLabels[tipo] || '';
+
+    vendasFiltradas = vendas.filter(v=>{
+      if(v.status==='cancelada' || !v.created_at) return false;
+      const d = localDateStr(v.created_at);
+      if(de && d < de) return false;
+      if(ate && d > ate) return false;
+      return true;
+    });
+
+    const faturamentoTotal = vendasFiltradas.reduce((s,v)=>s+Number(v.total||0),0);
+    const ticketMedio = vendasFiltradas.length ? faturamentoTotal/vendasFiltradas.length : 0;
+    const osNoPeriodo = os.filter(o=>{
+      if(!o.data_entrada) return false;
+      const d = localDateStr(o.data_entrada);
+      if(de && d < de) return false;
+      if(ate && d > ate) return false;
+      return true;
+    });
+    const osConcluidas = osNoPeriodo.filter(o=>['concluido','entregue'].includes(o.status));
+
+    const vendaIdsFiltradas = new Set(vendasFiltradas.map(v=>v.id));
+    let custoTotalVendido = 0;
+    let receitaItensComCusto = 0;
+    itensVenda.forEach(i=>{
+      if(!vendaIdsFiltradas.has(i.venda_id)) return;
+      const p = produtosPorId[i.produto_id];
+      const custoUnit = p ? Number(p.custo||0) : 0;
+      custoTotalVendido += custoUnit * Number(i.quantidade||0);
+      receitaItensComCusto += Number(i.subtotal||0);
+    });
+    const lucroVendas = receitaItensComCusto - custoTotalVendido;
+    const margemPct = receitaItensComCusto>0 ? (lucroVendas/receitaItensComCusto*100) : 0;
+
+    let diasArr = [];
+    if(de && ate){
+      let cur = new Date(de+'T00:00:00'); const fim = new Date(ate+'T00:00:00');
+      let guard = 0;
+      while(cur<=fim && guard<400){ diasArr.push(localDateStr(cur)); cur.setDate(cur.getDate()+1); guard++; }
+    } else {
+      const now = new Date();
+      for(let i=6;i>=0;i--){ const d=new Date(now); d.setDate(now.getDate()-i); diasArr.push(localDateStr(d)); }
+    }
+    if(diasArr.length>30) diasArr = diasArr.slice(-30);
+    const vendasPorDia = diasArr.map(d=>({d, total: vendasFiltradas.filter(v=>v.created_at && localDateStr(v.created_at)===d).reduce((s,v)=>s+Number(v.total||0),0)}));
+    const maxDia = Math.max(1, ...vendasPorDia.map(v=>v.total));
+
+    const produtoQtd = {};
+    itensVenda.forEach(i=>{ if(!vendaIdsFiltradas.has(i.venda_id)) return; produtoQtd[i.produto_nome||i.produto_id] = (produtoQtd[i.produto_nome||i.produto_id]||0) + i.quantidade; });
+    const topProdutos = Object.entries(produtoQtd).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    const maxProd = Math.max(1, ...topProdutos.map(p=>p[1]));
+
+    document.getElementById('relBody').innerHTML = `
+      <div class="grid grid-4" style="margin-bottom:18px;">
+        <div class="card stat-tile"><div class="stat-label">Faturamento (${escapeHtml(periodoLabelAtual)})</div><div class="stat-value">${fmtMoney(faturamentoTotal)}</div></div>
+        <div class="card stat-tile"><div class="stat-label">Ticket médio</div><div class="stat-value">${fmtMoney(ticketMedio)}</div></div>
+        <div class="card stat-tile"><div class="stat-label">OS concluídas</div><div class="stat-value">${osConcluidas.length}</div></div>
+        <div class="card stat-tile"><div class="stat-label">Total de OS no período</div><div class="stat-value">${osNoPeriodo.length}</div></div>
+      </div>
+     <div class="card" style="margin-bottom:18px;background:#f4faf4;border-color:#cdeacd;">
+        <div class="stat-label">Lucro das vendas <span class="stat-icon" style="background:#e7f8e7;color:var(--good);">&#128176;</span></div>
+        <div class="stat-value" style="color:var(--good);">${fmtMoney(lucroVendas)}</div>
+        <div class="stat-delta">Receita dos itens vendidos: ${fmtMoney(receitaItensComCusto)} &middot; Custo dos produtos: ${fmtMoney(custoTotalVendido)} &middot; Margem: ${margemPct.toFixed(1)}%</div>
+        <div class="hint">Calculado com base no custo cadastrado atualmente no estoque de cada produto vendido. Não inclui despesas gerais (aluguel, contas etc.) nem OS.</div>
+      </div>
+      <div class="grid grid-2">
+        <div class="card">
+          <div class="section-head"><h2>Vendas por dia</h2></div>
+          ${vendasPorDia.map(v=>`<div class="bar-row"><div class="lbl">${fmtDate(v.d)}</div><div class="track"><div class="fill" style="width:${(v.total/maxDia*100)}%"></div></div><div class="val">${fmtMoney(v.total)}</div></div>`).join('')}
+        </div>
+        <div class="card">
+          <div class="section-head"><h2>Produtos mais vendidos</h2></div>
+          ${topProdutos.length ? topProdutos.map(([nome,qtd])=>`<div class="bar-row"><div class="lbl">${escapeHtml(nome)}</div><div class="track"><div class="fill" style="width:${(qtd/maxProd*100)}%;background:var(--brand)"></div></div><div class="val">${qtd} un.</div></div>`).join('') : '<div class="empty-state" style="padding:20px;">Ainda sem vendas suficientes.</div>'}
+        </div>
+      </div>
+    `;
+  }
+
+  periodoSel.addEventListener('change', draw);
+  deInput.addEventListener('change', draw);
+  ateInput.addEventListener('change', draw);
+
+  document.getElementById('relExportCsvBtn').addEventListener('click', ()=>{
+    const linhas = [['Venda #','Data','Pagamento','Total']];
+    vendasFiltradas.forEach(v=> linhas.push([v.numero, fmtDateTime(v.created_at), v.forma_pagamento||'-', String(v.total||0).replace('.',',')]));
+    linhas.push([]);
+    linhas.push(['Resumo do período', periodoLabelAtual]);
+    linhas.push(['Faturamento total', String((vendasFiltradas.reduce((s,v)=>s+Number(v.total||0),0)).toFixed(2)).replace('.',',')]);
+    const csv = linhas.map(l=> l.map(c=> '"'+String(c).replace(/"/g,'""')+'"').join(';')).join('\n');
+    const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'relatorio-uptech-'+periodoSel.value+'.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  document.getElementById('relImprimirBtn').addEventListener('click', ()=>{
+    exportarRelatorioPDF(periodoLabelAtual, vendasFiltradas);
+  });
+
+  draw();
+}
+
+function exportarRelatorioPDF(periodoLabel, vendasFiltradas){
+  const win = window.open('', '_blank', 'width=850,height=1000');
+  if(!win){ toast('Não foi possível abrir a janela de impressão — verifique o bloqueador de pop-ups do navegador.', 'err'); return; }
+  const total = vendasFiltradas.reduce((s,v)=> s + Number(v.total||0), 0);
+  const linhas = vendasFiltradas.map(v=>`
+    <tr>
+      <td>#${v.numero}</td>
+      <td>${fmtDateTime(v.created_at)}</td>
+      <td style="text-transform:capitalize;">${escapeHtml(v.forma_pagamento||'-')}</td>
+      <td style="text-align:right;">${fmtMoney(v.total)}</td>
+    </tr>`).join('');
+  const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<title>Relatório - UpTECH</title>
+<style>
+  *{box-sizing:border-box;}
+  body{font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color:#0b0b0b; padding:40px; max-width:760px; margin:0 auto;}
+  .header{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #2a78d6;padding-bottom:16px;margin-bottom:26px;}
+  .brand{display:flex;align-items:center;gap:10px;}
+  .brand .mark{width:38px;height:38px;border-radius:9px;background:#2a78d6;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;}
+  .brand .name{font-size:21px;font-weight:700;letter-spacing:-0.02em;}
+  .doc-title{text-align:right;}
+  .doc-title h1{font-size:17px;margin:0;letter-spacing:0.02em;}
+  .doc-title .muted{color:#666;font-size:12px;margin-top:3px;}
+  table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12.5px;}
+  th,td{padding:8px 6px;border-bottom:1px solid #e1e0d9;text-align:left;}
+  th{font-size:10.5px;text-transform:uppercase;color:#888;}
+  .total-row{font-weight:700;font-size:15px;display:flex;justify-content:space-between;margin-top:18px;padding-top:12px;border-top:2px solid #0b0b0b;}
+  @media print{ body{padding:15mm;} }
+</style></head><body>
+  <div class="header">
+    <div class="brand"><div class="mark">UT</div><div class="name">UpTECH</div></div>
+    <div class="doc-title"><h1>Relatório de vendas</h1><div class="muted">${escapeHtml(periodoLabel)}</div></div>
+  </div>
+  <table><thead><tr><th>#</th><th>Data</th><th>Pagamento</th><th style="text-align:right;">Total</th></tr></thead><tbody>
+    ${linhas || '<tr><td colspan="4">Nenhuma venda no período.</td></tr>'}
+  </tbody></table>
+  <div class="total-row"><span>Total</span><span>${fmtMoney(total)}</span></div>
+</body></html>`;
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(()=>{ win.print(); }, 400);
 }
 
 /* ================= USUÁRIOS ================= */
