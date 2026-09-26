@@ -801,12 +801,12 @@ async function renderDashboard(){
         <div class="stat-delta">produto(s) no ou abaixo do mínimo</div>
       </div>
       <div class="card stat-tile">
-        <div class="stat-label">Faturamento do mês <span class="stat-icon" style="background:#e7f8e7;color:var(--good);">&#128200;</span></div>
+        <div class="stat-label">Valor de Venda (mês) <span class="stat-icon" style="background:#e7f8e7;color:var(--good);">&#128200;</span></div>
         <div class="stat-value">${fmtMoney(faturamentoMes)}</div>
         <div class="stat-delta">Saídas no mês: ${fmtMoney(saidasMes)}</div>
       </div>
       <div class="card stat-tile" style="grid-column:1/-1;background:linear-gradient(135deg,#eaf6ec,#f4fbf5);border-color:#cfe9d2;">
-        <div class="stat-label">Lucro líquido do mês <span class="stat-icon" style="background:#e7f8e7;color:var(--good);">&#128176;</span></div>
+        <div class="stat-label">Valor de Lucro (mês) <span class="stat-icon" style="background:#e7f8e7;color:var(--good);">&#128176;</span></div>
         <div class="stat-value" style="color:${lucroLiquidoMes>=0?'var(--good)':'var(--critical)'};">${fmtMoney(lucroLiquidoMes)}</div>
         <div class="stat-delta">Faturamento ${fmtMoney(faturamentoMes)} − Custo dos produtos vendidos ${fmtMoney(custoProdutosMes)} − Saídas ${fmtMoney(saidasMes)}</div>
       </div>
@@ -1803,6 +1803,14 @@ async function openOsDetail(osId){
 async function renderEstoque(){
   const produtos = await sbSelect('produtos');
   state.cache.produtos = produtos;
+  let entradas = [];
+  try{
+    const { data, error } = await sb.from('entradas_estoque').select('*').order('created_at', {ascending:false});
+    if(!error) entradas = data||[];
+  }catch(e){ entradas = []; }
+  const ultimaEntradaPorProduto = {};
+  entradas.forEach(e=>{ if(!ultimaEntradaPorProduto[e.produto_id]) ultimaEntradaPorProduto[e.produto_id] = e; });
+
   document.getElementById('content').innerHTML = `
     <div class="section-head">
       <div class="toolbar">
@@ -1813,7 +1821,7 @@ async function renderEstoque(){
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Produto</th><th>Categoria</th><th>Marca/Modelo</th><th>Custo</th><th>Preço venda</th><th>Estoque</th><th></th></tr></thead>
+        <thead><tr><th>Produto</th><th>Categoria</th><th>Marca/Modelo</th><th>Custo</th><th>Preço venda</th><th>Estoque</th><th>Última entrada</th><th></th></tr></thead>
         <tbody id="estBody"></tbody>
       </table>
     </div>
@@ -1825,7 +1833,9 @@ async function renderEstoque(){
     if(cat) list = list.filter(p=>p.categoria===cat);
     if(q) list = list.filter(p => [p.nome,p.marca,p.modelo,p.codigo_barras].filter(Boolean).some(f=>norm(f).includes(q)));
     const body = document.getElementById('estBody');
-    body.innerHTML = list.length ? list.map(p=>`
+    body.innerHTML = list.length ? list.map(p=>{
+      const ult = ultimaEntradaPorProduto[p.id];
+      return `
       <tr>
         <td><strong>${escapeHtml(p.nome)}</strong>${p.imei?`<div style="font-size:11px;color:var(--muted)">IMEI: ${escapeHtml(p.imei)}</div>`:''}</td>
         <td style="text-transform:capitalize">${escapeHtml(p.categoria)}</td>
@@ -1833,11 +1843,14 @@ async function renderEstoque(){
         <td>${fmtMoney(p.custo)}</td>
         <td>${fmtMoney(p.preco_venda)}</td>
         <td class="${p.estoque_atual<=p.estoque_minimo?'low-stock':''}">${p.estoque_atual} ${p.estoque_atual<=p.estoque_minimo?'&#9888;':''}</td>
+        <td style="font-size:12px;">${ult ? (fmtMoney(ult.valor_pago)+(ult.fornecedor?(' &middot; '+escapeHtml(ult.fornecedor)):'')+'<div style="color:var(--muted);font-size:11px;">'+fmtDate(ult.created_at)+'</div>') : '<span style="color:var(--muted);">Sem registro</span>'}</td>
         <td style="text-align:right;white-space:nowrap;">
+          <button class="btn btn-ghost btn-sm" data-entrada="${p.id}">+ Entrada</button>
           <button class="btn btn-ghost btn-sm" data-edit="${p.id}">Editar</button>
           <button class="btn btn-ghost btn-sm" data-del="${p.id}" style="color:var(--critical)">Excluir</button>
         </td>
-      </tr>`).join('') : `<tr class="empty-row"><td colspan="7">Nenhum produto encontrado.</td></tr>`;
+      </tr>`;
+    }).join('') : `<tr class="empty-row"><td colspan="8">Nenhum produto encontrado.</td></tr>`;
     body.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click', ()=> openProdutoForm(produtos.find(p=>p.id===b.dataset.edit))));
     body.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click', async ()=>{
       if(!confirm('Remover este produto do estoque ativo?')) return;
@@ -1845,11 +1858,60 @@ async function renderEstoque(){
       toast('Produto removido', 'ok');
       navigate('estoque');
     }));
+    body.querySelectorAll('[data-entrada]').forEach(b=>b.addEventListener('click', ()=> abrirEntradaEstoqueModal(produtos.find(p=>p.id===b.dataset.entrada), ultimaEntradaPorProduto[b.dataset.entrada])));
   }
   document.getElementById('estSearch').addEventListener('input', draw);
   document.getElementById('estCategoria').addEventListener('change', draw);
   document.getElementById('novoProdutoBtn').addEventListener('click', ()=> openProdutoForm(null));
   draw();
+}
+
+function abrirEntradaEstoqueModal(produto, ultima){
+  openModal(`
+    <div class="modal-header"><h3>Registrar entrada — ${escapeHtml(produto.nome)}</h3><button class="close-x" onclick="closeModal()">&times;</button></div>
+    <div class="modal-body">
+      ${ultima ? `<div class="hint" style="margin-bottom:14px;">Última compra: <strong>${fmtMoney(ultima.valor_pago)}</strong>${ultima.fornecedor?(' &middot; Fornecedor: <strong>'+escapeHtml(ultima.fornecedor)+'</strong>'):''} &middot; ${fmtDate(ultima.created_at)}</div>` : `<div class="hint" style="margin-bottom:14px;">Nenhuma entrada registrada ainda para este produto.</div>`}
+      <div class="row-flex">
+        <div class="field"><label>Quantidade</label><input id="entQtd" type="number" min="1" value="1"></div>
+        <div class="field"><label>Valor pago (por unidade)</label><input id="entValor" type="number" min="0" step="0.01" value="${produto.custo||0}"></div>
+      </div>
+      <div class="field"><label>Fornecedor</label><input id="entFornecedor" placeholder="Nome do fornecedor" value="${ultima?escapeHtml(ultima.fornecedor||''):''}"></div>
+      <div class="hint">Isso soma a quantidade no estoque e atualiza o custo do produto para o valor pago agora.</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="entSalvarBtn">Registrar entrada</button>
+    </div>
+  `);
+  document.getElementById('entSalvarBtn').addEventListener('click', async ()=>{
+    const qtd = Number(document.getElementById('entQtd').value)||0;
+    const valor = Number(document.getElementById('entValor').value)||0;
+    const fornecedor = document.getElementById('entFornecedor').value.trim();
+    if(qtd<=0){ toast('Informe uma quantidade válida', 'err'); return; }
+    const btn = document.getElementById('entSalvarBtn');
+    btn.disabled=true; btn.textContent='Salvando...';
+    try{
+      const { error } = await sb.from('entradas_estoque').insert({
+        produto_id: produto.id, quantidade: qtd, valor_pago: valor, fornecedor: fornecedor||null
+      });
+      if(error) throw error;
+      await sb.from('produtos').update({
+        estoque_atual: (produto.estoque_atual||0) + qtd,
+        custo: valor
+      }).eq('id', produto.id);
+      toast('Entrada registrada!', 'ok');
+      closeModal();
+      navigate('estoque');
+    }catch(err){
+      console.error(err);
+      if((err.message||'').toLowerCase().includes('entradas_estoque') || (err.message||'').toLowerCase().includes('does not exist') || (err.message||'').toLowerCase().includes('schema cache')){
+        toast('A tabela "entradas_estoque" ainda não existe no banco. Peça o SQL de criação e rode no Supabase.', 'err');
+      } else {
+        toast('Erro: '+err.message, 'err');
+      }
+      btn.disabled=false; btn.textContent='Registrar entrada';
+    }
+  });
 }
 
 /* ---------------- Cálculo automático do preço de venda (custo + margem) ---------------- */
