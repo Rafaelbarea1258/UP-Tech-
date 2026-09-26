@@ -701,9 +701,19 @@ async function renderDashboard(){
   const saidasMes = financeiro.filter(f => f.tipo==='saida' && (f.data||'').slice(0,7)===monthStr)
     .reduce((s,f)=> s + Number(f.valor||0), 0);
 
+  const produtosPorId = {};
+  produtos.forEach(p=>{ produtosPorId[p.id] = p; });
+  const vendasMes = vendas.filter(v => v.status !== 'cancelada' && v.created_at && localDateStr(v.created_at).slice(0,7) === monthStr);
+  const vendaIdsMes = new Set(vendasMes.map(v=>v.id));
+  let custoProdutosMes = 0;
+  itensVenda.forEach(i=>{
+    if(!vendaIdsMes.has(i.venda_id)) return;
+    const p = produtosPorId[i.produto_id];
+    custoProdutosMes += (p ? Number(p.custo||0) : 0) * Number(i.quantidade||0);
+  });
+  const lucroLiquidoMes = faturamentoMes - custoProdutosMes - saidasMes;
+
   const recentVendas = vendas.slice(0,5);
-    const produtosPorId = {};
-    produtos.forEach(p=>{ produtosPorId[p.id] = p; });
     const custoLucroPorVenda = {};
     recentVendas.forEach(v=>{
       let custo = 0;
@@ -753,6 +763,11 @@ async function renderDashboard(){
         <div class="stat-label">Faturamento do mês <span class="stat-icon" style="background:#e7f8e7;color:var(--good);">&#128200;</span></div>
         <div class="stat-value">${fmtMoney(faturamentoMes)}</div>
         <div class="stat-delta">Saídas no mês: ${fmtMoney(saidasMes)}</div>
+      </div>
+      <div class="card stat-tile" style="grid-column:1/-1;background:linear-gradient(135deg,#eaf6ec,#f4fbf5);border-color:#cfe9d2;">
+        <div class="stat-label">Lucro líquido do mês <span class="stat-icon" style="background:#e7f8e7;color:var(--good);">&#128176;</span></div>
+        <div class="stat-value" style="color:${lucroLiquidoMes>=0?'var(--good)':'var(--critical)'};">${fmtMoney(lucroLiquidoMes)}</div>
+        <div class="stat-delta">Faturamento ${fmtMoney(faturamentoMes)} − Custo dos produtos vendidos ${fmtMoney(custoProdutosMes)} − Saídas ${fmtMoney(saidasMes)}</div>
       </div>
     </div>
     <div class="grid grid-2">
