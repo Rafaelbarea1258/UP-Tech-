@@ -1129,10 +1129,6 @@ async function renderOrcamentos(){
 
   document.getElementById('content').innerHTML = `
     <div class="card" style="margin-bottom:20px;">
-      <div class="section-head"><h2>Buscar produto</h2></div>
-      <input id="orcSearch" placeholder="Nome, marca, modelo ou código de barras..." style="width:100%;padding:10px 12px;border:1px solid var(--gridline);border-radius:8px;font-size:14px;">
-      <div class="search-results" id="orcResults" style="max-height:220px;"></div>
-
       <div class="field" style="position:relative;margin-top:6px;">
         <label>Cliente</label>
         <div id="orcClienteChip" style="display:none;align-items:center;justify-content:space-between;padding:9px 12px;border:1px solid var(--gridline);border-radius:8px;background:#eaf1fc;font-size:13.5px;">
@@ -1144,6 +1140,10 @@ async function renderOrcamentos(){
         <div class="search-results" id="orcClienteResults" style="display:none;"></div>
         <div class="hint">Cliente não cadastrado? <a href="#" id="orcNovoCliente" style="color:var(--brand);font-weight:600;">Cadastrar rapidamente</a></div>
       </div>
+
+      <div class="section-head"><h2>Buscar produto</h2></div>
+      <input id="orcSearch" placeholder="Nome, marca, modelo ou código de barras..." style="width:100%;padding:10px 12px;border:1px solid var(--gridline);border-radius:8px;font-size:14px;">
+      <div class="search-results" id="orcResults" style="max-height:220px;"></div>
 
       <div class="section-head" style="margin-top:20px;padding-top:18px;border-top:1px solid var(--gridline);"><h2>Itens do orçamento</h2></div>
       <div class="cart-list" id="orcCartList"></div>
@@ -1214,10 +1214,11 @@ async function renderOrcamentos(){
       btn.addEventListener('click', ()=> addToOrcCart(btn.dataset.add));
     });
   }
-  renderResults(state.cache.produtos);
+  document.getElementById('orcResults').innerHTML = '';
   document.getElementById('orcSearch').addEventListener('input', (e)=>{
     const q = norm(e.target.value.trim());
-    const filtered = !q ? state.cache.produtos : state.cache.produtos.filter(p =>
+    if(!q){ document.getElementById('orcResults').innerHTML = ''; return; }
+    const filtered = state.cache.produtos.filter(p =>
       [p.nome,p.marca,p.modelo,p.codigo_barras].filter(Boolean).some(f=>norm(f).includes(q)));
     renderResults(filtered);
   });
