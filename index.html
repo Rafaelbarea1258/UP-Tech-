@@ -894,7 +894,7 @@ async function renderDashboard(){
 
 /* ================= PDV (VENDAS) ================= */
 async function renderPDV(){
-  const [produtos, clientes] = await Promise.all([sbSelect('produtos'), sbSelect('clientes')]);
+  const [produtos, clientes, vendas] = await Promise.all([sbSelect('produtos'), sbSelect('clientes'), sbSelect('vendas')]);
   state.cache.produtos = produtos.filter(p=>p.ativo);
   state.cache.clientes = clientes;
   state.pdvCart = state.pdvCart || [];
@@ -938,7 +938,31 @@ async function renderPDV(){
         <button class="btn btn-primary btn-block" id="pdvFinalizar">Finalizar venda</button>
       </div>
     </div>
+    <div class="section-head" style="margin-top:20px;">
+      <h2 style="font-size:13px;color:var(--muted);text-transform:uppercase;">${vendas.length} vendas</h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Cliente</th><th>Data</th><th>Pagamento</th><th>Total</th><th>Status</th></tr></thead>
+        <tbody id="pdvVendasBody"></tbody>
+      </table>
+    </div>
   `;
+
+  const PAGAMENTO_LABELS = {dinheiro:'Dinheiro', pix:'Pix', debito:'Cartão de débito', credito:'Cartão de crédito'};
+  const pdvVendasBody = document.getElementById('pdvVendasBody');
+  pdvVendasBody.innerHTML = vendas.length ? vendas.map(v=>{
+    const cliente = clientes.find(c=>c.id===v.cliente_id);
+    const cancelada = v.status==='cancelada';
+    return `<tr>
+      <td>#${v.numero}</td>
+      <td>${escapeHtml(cliente?.nome||'Não identificado')}</td>
+      <td>${fmtDate(v.created_at)}</td>
+      <td>${PAGAMENTO_LABELS[v.forma_pagamento]||v.forma_pagamento||'-'}</td>
+      <td>${fmtMoney(v.total)}</td>
+      <td><span class="badge ${cancelada?'badge-critical':'badge-good'}"><span class="badge-dot"></span>${cancelada?'Cancelada':'Concluída'}</span></td>
+    </tr>`;
+  }).join('') : `<tr class="empty-row"><td colspan="6">Nenhuma venda registrada ainda.</td></tr>`;
 
   function renderResults(list){
     const el = document.getElementById('pdvResults');
@@ -955,10 +979,11 @@ async function renderPDV(){
       btn.addEventListener('click', ()=> addToCart(btn.dataset.add));
     });
   }
-  renderResults(state.cache.produtos);
+  document.getElementById('pdvResults').innerHTML = '';
   document.getElementById('pdvSearch').addEventListener('input', (e)=>{
     const q = norm(e.target.value.trim());
-    const filtered = !q ? state.cache.produtos : state.cache.produtos.filter(p =>
+    if(!q){ document.getElementById('pdvResults').innerHTML = ''; return; }
+    const filtered = state.cache.produtos.filter(p =>
       [p.nome,p.marca,p.modelo,p.codigo_barras].filter(Boolean).some(f=>norm(f).includes(q)));
     renderResults(filtered);
   });
