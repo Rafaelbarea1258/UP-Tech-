@@ -2213,7 +2213,11 @@ function precoCalcHtml(produto){
   const precoAtual = produto?.preco_venda || 0;
   return `
   <div class="card" style="background:#f9fafb;margin:14px 0;">
-    <div class="section-head" style="margin-bottom:10px;"><h2 style="font-size:13px;">Preço de venda (calculado a partir do custo)</h2></div>
+    <div class="section-head" style="margin-bottom:10px;"><h2 style="font-size:13px;">Preço de venda</h2></div>
+    <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-secondary);margin:2px 0 10px;">
+      <input type="checkbox" id="pPrecoManual" style="width:auto;"> Definir preço manualmente
+    </label>
+    <div id="pPrecoCalcFields">
     <div class="row-flex">
       <div class="field"><label>Multiplicador</label><input id="pPrecoMult" type="number" min="1" step="0.1" value="2"></div>
       <div class="field"><label>Taxa da maquininha (%)</label><input id="pPrecoTaxa" type="number" min="0" step="0.1" value="15"></div>
@@ -2226,13 +2230,16 @@ function precoCalcHtml(produto){
       <input type="checkbox" id="pPrecoSemFrete" style="width:auto;"> Não incluir frete no preço deste produto
     </label>
     <div id="pPrecoBreakdown" style="font-size:12.5px;color:var(--text-secondary);line-height:1.7;"></div>
-    <div style="margin-top:10px;font-weight:700;font-size:17px;">Preço de venda: <span id="pPrecoFinal">R$ 0,00</span></div>
-      <div style="margin-top:4px;font-size:13px;color:var(--good);">Lucro estimado: <span id="pPrecoLucro">R$ 0,00</span></div>
-    <div class="hint">${produto ? `Preço cadastrado atualmente: ${fmtMoney(precoAtual)}. Ajuste os campos acima para recalcular.` : 'Calculado automaticamente: custo × multiplicador, mais a taxa da maquininha e o frete (se houver), menos o desconto.'}</div>
-    <input type="hidden" id="pPreco" value="${precoAtual}">
+    </div>
+    <div class="field" style="margin-top:10px;">
+      <label>Preço de venda (R$)</label>
+      <input id="pPreco" type="number" min="0" step="0.01" value="${precoAtual}" style="font-weight:700;font-size:17px;">
+    </div>
+    <div style="margin-top:4px;font-size:13px;color:var(--good);">Lucro estimado: <span id="pPrecoLucro">R$ 0,00</span></div>
+    <div class="hint">${produto ? `Preço cadastrado atualmente: ${fmtMoney(precoAtual)}.` : 'Calculado automaticamente: custo × multiplicador, mais a taxa da maquininha e o frete (se houver), menos o desconto. Marque "Definir preço manualmente" para digitar o valor direto.'}</div>
   </div>`;
 }
-function wirePrecoCalc(){
+function wirePrecoCalc(isEditMode){
   const custoEl = document.getElementById('pCusto');
   const multEl = document.getElementById('pPrecoMult');
   const taxaEl = document.getElementById('pPrecoTaxa');
@@ -2240,9 +2247,10 @@ function wirePrecoCalc(){
   const semFreteEl = document.getElementById('pPrecoSemFrete');
   const descontoEl = document.getElementById('pPrecoDesconto');
   const breakdownEl = document.getElementById('pPrecoBreakdown');
-  const finalEl = document.getElementById('pPrecoFinal');
-      const lucroEl = document.getElementById('pPrecoLucro');
+  const lucroEl = document.getElementById('pPrecoLucro');
   const hiddenEl = document.getElementById('pPreco');
+  const manualEl = document.getElementById('pPrecoManual');
+  const calcFieldsEl = document.getElementById('pPrecoCalcFields');
   if(!custoEl) return;
   function calc(){
     const custo = Number(custoEl.value)||0;
@@ -2259,13 +2267,28 @@ function wirePrecoCalc(){
       + `+ Maquininha (${taxaPct}%): ${fmtMoney(taxaValor)}<br>`
       + (frete>0 ? `+ Frete: ${fmtMoney(frete)}<br>` : '')
       + (descontoPct>0 ? `- Desconto (${descontoPct}%): -${fmtMoney(descontoValor)}<br>` : '');
-    finalEl.textContent = fmtMoney(total);
-      if(lucroEl) lucroEl.textContent = fmtMoney(total - custo);
     hiddenEl.value = total.toFixed(2);
+    if(lucroEl) lucroEl.textContent = fmtMoney(total - custo);
     return total;
   }
-  [custoEl,multEl,taxaEl,freteEl,semFreteEl,descontoEl].forEach(el=> el.addEventListener('input', calc));
-  calc();
+  function atualizarLucroManual(){
+    const custo = Number(custoEl.value)||0;
+    const total = Number(hiddenEl.value)||0;
+    if(lucroEl) lucroEl.textContent = fmtMoney(total - custo);
+  }
+  function syncManual(skipCalc){
+    const manual = manualEl.checked;
+    calcFieldsEl.style.display = manual ? 'none' : '';
+    hiddenEl.readOnly = !manual;
+    hiddenEl.style.background = manual ? '' : '#eee';
+    if(manual){ atualizarLucroManual(); }
+    else if(!skipCalc){ calc(); }
+    else { atualizarLucroManual(); }
+  }
+  [custoEl,multEl,taxaEl,freteEl,semFreteEl,descontoEl].forEach(el=> el.addEventListener('input', ()=>{ if(!manualEl.checked) calc(); }));
+  hiddenEl.addEventListener('input', ()=>{ if(manualEl.checked) atualizarLucroManual(); });
+  manualEl.addEventListener('change', ()=> syncManual(false));
+  syncManual(!!isEditMode);
 }
 
 function openProdutoForm(produto){
@@ -2301,7 +2324,7 @@ function openProdutoForm(produto){
       <button class="btn btn-primary" id="pSalvarBtn">${isEdit?'Salvar alterações':'Cadastrar produto'}</button>
     </div>
   `);
-  wirePrecoCalc();
+  wirePrecoCalc(isEdit);
   document.getElementById('pSalvarBtn').addEventListener('click', async ()=>{
     const nome = document.getElementById('pNome').value.trim();
     if(!nome){ toast('Informe o nome do produto', 'err'); return; }
