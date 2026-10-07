@@ -1399,9 +1399,24 @@ async function renderOrcamentos(){
           <div style="color:var(--muted);font-size:11.5px;">${fmtMoney(p.preco_venda)} &middot; estoque: ${p.estoque_atual}</div>
         </div>
         <button class="add-btn" data-add="${p.id}">+ Adicionar</button>
+        <button class="btn-ghost btn-sm" data-del="${p.id}" style="color:var(--critical);margin-left:6px;">Excluir</button>
       </div>`).join('');
     el.querySelectorAll('[data-add]').forEach(btn=>{
       btn.addEventListener('click', ()=> addToOrcCart(btn.dataset.add));
+    });
+    el.querySelectorAll('[data-del]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        if(!confirm('Remover este produto do estoque ativo?')) return;
+        await sb.from('produtos').update({ativo:false}).eq('id', btn.dataset.del);
+        state.cache.produtos = state.cache.produtos.filter(p=>p.id!==btn.dataset.del);
+        toast('Produto removido', 'ok');
+        const q = norm(document.getElementById('orcSearch').value.trim());
+        if(q){
+          renderResults(state.cache.produtos.filter(p=>[p.nome,p.marca,p.modelo,p.codigo_barras].filter(Boolean).some(f=>norm(f).includes(q))));
+        } else {
+          document.getElementById('orcResults').innerHTML = '';
+        }
+      });
     });
   }
   document.getElementById('orcResults').innerHTML = '';
