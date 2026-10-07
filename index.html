@@ -563,10 +563,14 @@ document.getElementById('modalOverlay').addEventListener('click', (e)=>{
 });
 
 async function sbSelect(table, query=''){
-  const { data, error } = await sb.from(table).select(query || '*').order('created_at', {ascending:false});
+  let { data, error } = await sb.from(table).select(query || '*').order('created_at', {ascending:false});
+  if(error && error.code === '42703'){
+    ({ data, error } = await sb.from(table).select(query || '*'));
+  }
   if(error){ console.error(table, error); toast('Erro ao carregar '+table+': '+error.message, 'err'); return []; }
   return data || [];
 }
+
 
 /* ---------------- Auth ---------------- */
 const SESSION_KEY = 'uptech_session';
@@ -2252,6 +2256,11 @@ function wirePrecoCalc(isEditMode){
   const manualEl = document.getElementById('pPrecoManual');
   const calcFieldsEl = document.getElementById('pPrecoCalcFields');
   if(!custoEl) return;
+  function atualizarLucro(){
+    const custo = Number(custoEl.value)||0;
+    const total = Number(hiddenEl.value)||0;
+    if(lucroEl) lucroEl.textContent = fmtMoney(total - custo);
+  }
   function calc(){
     const custo = Number(custoEl.value)||0;
     const mult = Number(multEl.value)||0;
@@ -2268,28 +2277,21 @@ function wirePrecoCalc(isEditMode){
       + (frete>0 ? `+ Frete: ${fmtMoney(frete)}<br>` : '')
       + (descontoPct>0 ? `- Desconto (${descontoPct}%): -${fmtMoney(descontoValor)}<br>` : '');
     hiddenEl.value = total.toFixed(2);
-    if(lucroEl) lucroEl.textContent = fmtMoney(total - custo);
+    atualizarLucro();
     return total;
-  }
-  function atualizarLucroManual(){
-    const custo = Number(custoEl.value)||0;
-    const total = Number(hiddenEl.value)||0;
-    if(lucroEl) lucroEl.textContent = fmtMoney(total - custo);
   }
   function syncManual(skipCalc){
     const manual = manualEl.checked;
     calcFieldsEl.style.display = manual ? 'none' : '';
-    hiddenEl.readOnly = !manual;
-    hiddenEl.style.background = manual ? '' : '#eee';
-    if(manual){ atualizarLucroManual(); }
-    else if(!skipCalc){ calc(); }
-    else { atualizarLucroManual(); }
+    if(!manual && !skipCalc){ calc(); } else { atualizarLucro(); }
   }
-  [custoEl,multEl,taxaEl,freteEl,semFreteEl,descontoEl].forEach(el=> el.addEventListener('input', ()=>{ if(!manualEl.checked) calc(); }));
-  hiddenEl.addEventListener('input', ()=>{ if(manualEl.checked) atualizarLucroManual(); });
+  custoEl.addEventListener('input', ()=>{ if(manualEl.checked) atualizarLucro(); else calc(); });
+  [multEl,taxaEl,freteEl,semFreteEl,descontoEl].forEach(el=> el.addEventListener('input', ()=>{ if(!manualEl.checked) calc(); }));
+  hiddenEl.addEventListener('input', atualizarLucro);
   manualEl.addEventListener('change', ()=> syncManual(false));
   syncManual(!!isEditMode);
 }
+
 
 function openProdutoForm(produto){
   const isEdit = !!produto;
@@ -2989,3 +2991,4 @@ function openUsuarioForm(usuario){
 </script>
 </body>
 </html>
+Page_DownPage_DownPage_Down
