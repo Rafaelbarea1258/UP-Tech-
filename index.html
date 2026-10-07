@@ -1590,6 +1590,75 @@ async function editarOrcamentoRapido(orcId){
   navigate('orcamentos');
 }
 
+const CHECKLIST_ITEMS = {
+  celular: [
+    {key:'liga', label:'Liga normalmente'},
+    {key:'tela', label:'Tela sem trincos ou manchas'},
+    {key:'touch', label:'Touch screen responde bem'},
+    {key:'botoes', label:'Botões físicos funcionam (volume/power)'},
+    {key:'cam_frontal', label:'Câmera frontal funciona'},
+    {key:'cam_traseira', label:'Câmera traseira funciona'},
+    {key:'audio', label:'Alto-falante/áudio funciona'},
+    {key:'microfone', label:'Microfone funciona'},
+    {key:'carga', label:'Carrega normalmente'},
+    {key:'wifi', label:'Wi-Fi conecta'},
+    {key:'bateria', label:'Bateria segura carga'},
+    {key:'biometria', label:'Digital/Face ID funciona'},
+  ],
+  tablet: [
+    {key:'liga', label:'Liga normalmente'},
+    {key:'tela', label:'Tela sem trincos ou manchas'},
+    {key:'touch', label:'Touch screen responde bem'},
+    {key:'botoes', label:'Botões físicos funcionam (volume/power)'},
+    {key:'cam_frontal', label:'Câmera frontal funciona'},
+    {key:'cam_traseira', label:'Câmera traseira funciona'},
+    {key:'audio', label:'Alto-falante/áudio funciona'},
+    {key:'carga', label:'Carrega normalmente'},
+    {key:'wifi', label:'Wi-Fi conecta'},
+    {key:'bateria', label:'Bateria segura carga'},
+  ],
+  computador: [
+    {key:'liga', label:'Liga normalmente'},
+    {key:'tela', label:'Tela/monitor sem defeitos'},
+    {key:'teclado', label:'Teclado funciona'},
+    {key:'touchpad', label:'Touchpad/mouse funciona'},
+    {key:'usb', label:'Portas USB funcionam'},
+    {key:'wifi', label:'Wi-Fi conecta'},
+    {key:'bateria', label:'Bateria segura carga (notebook)'},
+    {key:'carga', label:'Fonte/carregador funciona'},
+    {key:'so', label:'Sistema operacional inicia normalmente'},
+    {key:'hd', label:'HD/SSD reconhecido'},
+  ],
+  outro: [
+    {key:'liga', label:'Liga normalmente'},
+    {key:'funcionamento', label:'Funcionamento geral OK'},
+    {key:'fisico', label:'Sem danos físicos visíveis'},
+  ],
+};
+function checklistItemsFor(tipo){ return CHECKLIST_ITEMS[tipo] || CHECKLIST_ITEMS.outro; }
+function renderOsChecklist(tipo, saved){
+  const container = document.getElementById('osChecklistContainer');
+  if(!container) return;
+  const items = checklistItemsFor(tipo);
+  const savedMap = {};
+  (saved||[]).forEach(s=> savedMap[s.key] = s.status);
+  container.innerHTML = items.map(it=>{
+    const cur = savedMap[it.key] || 'na';
+    return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--gridline);">
+      <span style="font-size:13px;">${escapeHtml(it.label)}</span>
+      <select data-check="${it.key}" data-label="${escapeHtml(it.label)}" style="width:auto;min-width:130px;">
+        <option value="na" ${cur==='na'?'selected':''}>Não testado</option>
+        <option value="ok" ${cur==='ok'?'selected':''}>OK</option>
+        <option value="defeito" ${cur==='defeito'?'selected':''}>Com defeito</option>
+      </select>
+    </div>`;
+  }).join('');
+}
+function coletarOsChecklist(){
+  const rows = document.querySelectorAll('#osChecklistContainer [data-check]');
+  return [...rows].map(sel => ({key: sel.dataset.check, label: sel.dataset.label||'', status: sel.value}));
+}
+
 /* ================= ORDENS DE SERVIÇO ================= */
 async function renderOS(){
   const [os, clientes, usuarios] = await Promise.all([sbSelect('ordens_servico'), sbSelect('clientes'), sbSelect('usuarios')]);
@@ -1652,6 +1721,11 @@ function openOsForm(){
       </div>
       <div class="field"><label>Acessórios entregues junto</label><input id="osAcessorios" placeholder="Ex: carregador, capa..."></div>
       <div class="field"><label>Defeito relatado pelo cliente</label><textarea id="osDefeito" rows="3"></textarea></div>
+      <div class="card" style="background:#f9fafb;margin:14px 0;">
+        <div class="section-head" style="margin-bottom:10px;"><h2 style="font-size:13px;">Checklist de entrada</h2></div>
+        <div id="osChecklistContainer"></div>
+        <div class="field" style="margin-top:10px;"><label>Observações do checklist</label><textarea id="osChecklistObs" rows="2" placeholder="Ex: celular não está ligando, tela com queimadura..."></textarea></div>
+      </div>
       ${calculadoraPrecoHtml('osNew')}
       <div class="row-flex">
         <div class="field"><label>Valor do orçamento (R$)</label><input id="osOrcamento" type="number" min="0" step="0.01" value="0"></div>
@@ -1673,6 +1747,8 @@ function openOsForm(){
     }, true);
   });
   wireCalculadoraPreco('osNew', 'osOrcamento');
+  renderOsChecklist(document.getElementById('osTipo').value);
+  document.getElementById('osTipo').addEventListener('change', (e)=> renderOsChecklist(e.target.value));
   document.getElementById('osSalvarBtn').addEventListener('click', async ()=>{
     const btn = document.getElementById('osSalvarBtn');
     btn.disabled = true; btn.textContent = 'Salvando...';
@@ -1690,6 +1766,8 @@ function openOsForm(){
         valor_orcamento: Number(document.getElementById('osOrcamento').value)||0,
         data_previsao: document.getElementById('osPrevisao').value || null,
         garantia_dias: Number(document.getElementById('osGarantia').value)||0,
+        checklist_entrada: coletarOsChecklist(),
+        checklist_observacoes: document.getElementById('osChecklistObs').value.trim(),
         status: 'aguardando_diagnostico',
       };
       const { error } = await sb.from('ordens_servico').insert(payload);
@@ -1726,6 +1804,15 @@ async function openOsDetail(osId){
         <div class="field"><label>IMEI</label><input value="${escapeHtml(o.imei||'-')}" disabled></div>
       </div>
       <div class="field"><label>Defeito relatado</label><textarea rows="2" disabled>${escapeHtml(o.defeito_relatado||'')}</textarea></div>
+      <div class="card" style="background:#f9fafb;margin:14px 0;">
+        <div class="section-head" style="margin-bottom:10px;"><h2 style="font-size:13px;">Checklist de entrada</h2></div>
+        ${(o.checklist_entrada && o.checklist_entrada.length) ? o.checklist_entrada.map(it=>{
+          const badge = it.status==='ok' ? 'badge-good' : it.status==='defeito' ? 'badge-critical' : 'badge-muted';
+          const lbl = it.status==='ok' ? 'OK' : it.status==='defeito' ? 'Com defeito' : 'Não testado';
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--gridline);font-size:13px;"><span>${escapeHtml(it.label)}</span><span class="badge ${badge}"><span class="badge-dot"></span>${lbl}</span></div>`;
+        }).join('') : '<div style="color:var(--muted);font-size:12.5px;">Nenhum checklist registrado.</div>'}
+        ${o.checklist_observacoes ? `<div class="hint" style="margin-top:8px;"><strong>Observações do checklist:</strong> ${escapeHtml(o.checklist_observacoes)}</div>` : ''}
+      </div>
       <div class="field"><label>Diagnóstico técnico</label><textarea id="osDiagnostico" rows="2">${escapeHtml(o.diagnostico||'')}</textarea></div>
       <div class="field"><label>Serviço realizado</label><textarea id="osServico" rows="2">${escapeHtml(o.servico_realizado||'')}</textarea></div>
 
