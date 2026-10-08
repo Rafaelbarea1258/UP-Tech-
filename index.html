@@ -300,6 +300,7 @@ tbody tr:hover{background:#f9fafb;}
         <div class="navitem" data-view="orcamentos"><span class="ico">&#128203;</span> Orçamentos</div>
         <div class="navitem" data-view="os"><span class="ico">&#128295;</span> Ordens de Serviço</div>
         <div class="navitem" data-view="estoque"><span class="ico">&#128230;</span> Estoque</div>
+        <div class="navitem" data-view="compras"><span class="ico">&#128722;</span> Compras</div>
         <div class="navitem" data-view="clientes"><span class="ico">&#128100;</span> Clientes</div>
       </div>
       <div class="navgroup">
@@ -640,6 +641,7 @@ const VIEW_META = {
   orcamentos: {title:'Orçamentos', sub:'Monte propostas de venda sem mexer no estoque'},
   os: {title:'Ordens de Serviço', sub:'Assistência técnica — consertos e diagnósticos'},
   estoque: {title:'Estoque', sub:'Produtos, celulares, computadores, acessórios e peças'},
+  compras: {title:'Compras', sub:'Registre as compras de produtos para fornecedores'},
   clientes: {title:'Clientes', sub:'Cadastro e histórico de clientes'},
   financeiro: {title:'Financeiro', sub:'Caixa, contas a pagar e a receber'},
   relatorios: {title:'Relatórios', sub:'Desempenho da loja'},
@@ -679,6 +681,7 @@ async function navigate(view, force=false){
       case 'orcamentos': await renderOrcamentos(); break;
       case 'os': await renderOS(); break;
       case 'estoque': await renderEstoque(); break;
+      case 'compras': await renderCompras(); break;
       case 'clientes': await renderClientes(); break;
       case 'financeiro': await renderFinanceiro(); break;
       case 'relatorios': await renderRelatorios(); break;
@@ -2212,6 +2215,125 @@ function abrirEntradaEstoqueModal(produto, ultima){
   });
 }
 
+/* ---------------- COMPRAS ---------------- */
+async function renderCompras(){
+  const produtos = await sbSelect('produtos');
+  state.cache.produtos = produtos;
+  let entradas = [];
+  try{
+    const { data, error } = await sb.from('entradas_estoque').select('*').order('created_at', {ascending:false});
+    if(!error) entradas = data||[];
+  }catch(e){ entradas = []; }
+
+  document.getElementById('content').innerHTML = `
+    <div class="section-head">
+      <div class="toolbar">
+        <input id="compSearch" placeholder="Buscar produto ou fornecedor...">
+      </div>
+      <button class="btn btn-primary" id="novaCompraBtn">+ Registrar compra</button>
+    </div>
+    <div class="card" style="margin-bottom:14px;">
+      <div style="display:flex;gap:28px;flex-wrap:wrap;">
+        <div><div class="hint">Total investido</div><div style="font-size:20px;font-weight:700;" id="compTotalGasto">R$ 0,00</div></div>
+        <div><div class="hint">Compras registradas</div><div style="font-size:20px;font-weight:700;" id="compQtdTotal">0</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <table><thead><tr><th>Data</th><th>Produto</th><th>Quantidade</th><th>Valor unit.</th><th>Total</th><th>Fornecedor</th></tr></thead>
+      <tbody id="compTbody"></tbody></table>
+      <div id="compEmpty" class="hint" style="padding:16px 0;display:none;">Nenhuma compra registrada ainda.</div>
+    </div>
+  `;
+
+  function draw(){
+    const q = (document.getElementById('compSearch').value||'').toLowerCase();
+    const rows = entradas.filter(e=>{
+      const p = produtos.find(x=>x.id===e.produto_id);
+      const nome = (p?.nome||'').toLowerCase();
+      const forn = (e.fornecedor||'').toLowerCase();
+      return !q || nome.includes(q) || forn.includes(q);
+    });
+    const tbody = document.getElementById('compTbody');
+    tbody.innerHTML = rows.map(e=>{
+      const p = produtos.find(x=>x.id===e.produto_id);
+      const total = (e.quantidade||0) * (e.valor_pago||0);
+      return `<tr>
+        <td>${fmtDate(e.created_at)}</td>
+        <td>${escapeHtml(p?.nome || 'Produto removido')}</td>
+        <td>${e.quantidade}</td>
+        <td>${fmtMoney(e.valor_pago)}</td>
+        <td>${fmtMoney(total)}</td>
+        <td>${escapeHtml(e.fornecedor||'—')}</td>
+      </tr>`;
+    }).join('');
+    document.getElementById('compEmpty').style.display = rows.length ? 'none' : '';
+    const totalGasto = rows.reduce((acc,e)=> acc + (e.quantidade||0)*(e.valor_pago||0), 0);
+    document.getElementById('compTotalGasto').textContent = fmtMoney(totalGasto);
+    document.getElementById('compQtdTotal').textContent = rows.length;
+  }
+  document.getElementById('compSearch').addEventListener('input', draw);
+  document.getElementById('novaCompraBtn').addEventListener('click', ()=> abrirNovaCompraModal(produtos));
+  draw();
+}
+
+function abrirNovaCompraModal(produtos){
+  openModal(`
+    <div class="modal-header"><h3>Registrar compra</h3><button class="close-x" onclick="closeModal()">&times;</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Produto</label>
+        <select id="compProduto">
+          <option value="">Selecione...</option>
+          ${produtos.map(p=>`<option value="${p.id}">${escapeHtml(p.nome)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="row-flex">
+        <div class="field"><label>Quantidade</label><input id="compQtd" type="number" min="1" value="1"></div>
+        <div class="field"><label>Valor pago (por unidade)</label><input id="compValor" type="number" min="0" step="0.01" value="0"></div>
+      </div>
+      <div class="field"><label>Fornecedor</label><input id="compFornecedor" placeholder="Nome do fornecedor"></div>
+      <div class="field"><label>Observações</label><input id="compObs" placeholder="Opcional"></div>
+      <div class="hint">Isso soma a quantidade no estoque e atualiza o custo do produto para o valor pago agora.</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="compSalvarBtn">Registrar compra</button>
+    </div>
+  `);
+  document.getElementById('compProduto').addEventListener('change', ()=>{
+    const p = produtos.find(x=>x.id===document.getElementById('compProduto').value);
+    if(p) document.getElementById('compValor').value = p.custo||0;
+  });
+  document.getElementById('compSalvarBtn').addEventListener('click', async ()=>{
+    const produtoId = document.getElementById('compProduto').value;
+    const qtd = Number(document.getElementById('compQtd').value)||0;
+    const valor = Number(document.getElementById('compValor').value)||0;
+    const fornecedor = document.getElementById('compFornecedor').value.trim();
+    const obs = document.getElementById('compObs').value.trim();
+    if(!produtoId){ toast('Selecione um produto', 'err'); return; }
+    if(qtd<=0){ toast('Informe uma quantidade válida', 'err'); return; }
+    const btn = document.getElementById('compSalvarBtn');
+    btn.disabled=true; btn.textContent='Salvando...';
+    try{
+      const { error } = await sb.from('entradas_estoque').insert({
+        produto_id: produtoId, quantidade: qtd, valor_pago: valor, fornecedor: fornecedor||null, observacoes: obs||null
+      });
+      if(error) throw error;
+      const produto = produtos.find(x=>x.id===produtoId);
+      await sb.from('produtos').update({
+        estoque_atual: (produto.estoque_atual||0) + qtd,
+        custo: valor
+      }).eq('id', produtoId);
+      toast('Compra registrada!', 'ok');
+      closeModal();
+      navigate('compras');
+    }catch(err){
+      console.error(err);
+      toast('Erro ao registrar compra: '+err.message, 'err');
+      btn.disabled = false; btn.textContent = 'Registrar compra';
+    }
+  });
+}
+
 /* ---------------- Cálculo automático do preço de venda (custo + margem) ---------------- */
 function precoCalcHtml(produto){
   const precoAtual = produto?.preco_venda || 0;
@@ -2991,4 +3113,3 @@ function openUsuarioForm(usuario){
 </script>
 </body>
 </html>
-Page_DownPage_DownPage_Down
