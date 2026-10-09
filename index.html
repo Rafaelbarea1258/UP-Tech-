@@ -299,6 +299,7 @@ tbody tr:hover{background:#f9fafb;}
         <div class="navitem" data-view="pdv"><span class="ico">&#128181;</span> Vendas (PDV)</div>
         <div class="navitem" data-view="orcamentos"><span class="ico">&#128203;</span> Orçamentos</div>
         <div class="navitem" data-view="os"><span class="ico">&#128295;</span> Ordens de Serviço</div>
+        <div class="navitem" data-view="checklist"><span class="ico">&#9989;</span> Checklist</div>
         <div class="navitem" data-view="estoque"><span class="ico">&#128230;</span> Estoque</div>
         <div class="navitem" data-view="compras"><span class="ico">&#128722;</span> Compras</div>
         <div class="navitem" data-view="fornecedores"><span class="ico">&#127970;</span> Fornecedores</div>
@@ -646,6 +647,7 @@ const VIEW_META = {
   pdv: {title:'Vendas (PDV)', sub:'Registrar vendas de produtos e acessórios'},
   orcamentos: {title:'Orçamentos', sub:'Monte propostas de venda sem mexer no estoque'},
   os: {title:'Ordens de Serviço', sub:'Assistência técnica — consertos e diagnósticos'},
+  checklist: {title:'Checklist', sub:'Entrada de aparelhos, cadastro rápido de cliente e lucro'},
   estoque: {title:'Estoque', sub:'Produtos, celulares, computadores, acessórios e peças'},
   compras: {title:'Compras', sub:'Registre as compras de produtos para fornecedores'},
   fornecedores: {title:'Fornecedores', sub:'Cadastro de fornecedores para compras'},
@@ -686,7 +688,7 @@ async function navigate(view, force=false){
       case 'dashboard': await renderDashboard(); break;
       case 'pdv': await renderPDV(); break;
       case 'orcamentos': await renderOrcamentos(); break;
-      case 'os': await renderOS(); break;
+      case 'os': await renderOS(); break; case 'checklist': await renderChecklist(); break;
       case 'estoque': await renderEstoque(); break;
       case 'compras': await renderCompras(); break;
       case 'fornecedores': await renderFornecedores(); break;
@@ -1897,6 +1899,43 @@ function coletarOsChecklist(){
 }
 
 /* ================= ORDENS DE SERVIÇO ================= */
+async function renderChecklist(){
+  const [os, clientes, osPecas, produtos] = await Promise.all([sbSelect('ordens_servico'), sbSelect('clientes'), sbSelect('os_pecas'), sbSelect('produtos')]);
+  state.cache.os = os; state.cache.clientes = clientes; state.cache.produtos = produtos;
+  const produtosById = {}; produtos.forEach(function(p){ produtosById[p.id] = p; });
+  const pecasByOs = {}; osPecas.forEach(function(p){ (pecasByOs[p.os_id] = pecasByOs[p.os_id] || []).push(p); });
+  function custoDaOs(o){
+    const pecas = pecasByOs[o.id] || [];
+    return pecas.reduce(function(sum,p){
+      const prod = p.produto_id ? produtosById[p.produto_id] : null;
+      const custoUnit = prod ? Number(prod.custo||0) : 0;
+      return sum + custoUnit * Number(p.quantidade||0);
+    }, 0);
+  }
+  function receitaDaOs(o){ return Number(o.valor_final)>0 ? Number(o.valor_final) : Number(o.valor_orcamento||0); }
+  function lucroDaOs(o){ return receitaDaOs(o) - custoDaOs(o); }
+  const sorted = [...os].sort((a,b)=> new Date(b.data_entrada) - new Date(a.data_entrada));
+  const lucroTotal = sorted.reduce(function(sum,o){ return sum + lucroDaOs(o); }, 0);
+  const rowsHtml = sorted.length ? sorted.map(function(o){
+    const cliente = clientes.find(function(c){ return c.id===o.cliente_id; });
+    const itens = o.checklist_entrada || [];
+    const okCount = itens.filter(function(i){ return i.status==='ok'; }).length;
+    const defCount = itens.filter(function(i){ return i.status==='defeito'; }).length;
+    const resumo = itens.length ? (okCount+' OK &middot; '+defCount+' com defeito') : 'Checklist não preenchido';
+    const lucro = lucroDaOs(o);
+    const lucroCor = lucro >= 0 ? '#16a34a' : 'var(--critical)';
+    return '<div class="os-card" data-os="'+o.id+'" style="border-radius:0;border-bottom:1px solid var(--gridline);cursor:pointer;">'
+      + '<div class="oh"><span>#'+o.numero+'</span><span>'+fmtDate(o.data_entrada)+'</span></div>'
+      + '<div class="om">'+escapeHtml(o.marca||'')+' '+escapeHtml(o.modelo||'')+'</div>'
+      + '<div class="om" style="color:var(--muted)">'+escapeHtml((cliente&&cliente.nome)||'Cliente não informado')+'</div>'
+      + '<div class="oc">'+resumo+'</div>'
+      + '<div class="oc" style="color:'+lucroCor+';font-weight:700;">Lucro: '+fmtMoney(lucro)+'</div>'
+      + '</div>';
+  }).join('') : '<div style="color:var(--muted);font-size:13px;padding:16px;">Nenhum checklist registrado ainda.</div>';
+  document.getElementById('content').innerHTML = `<div class="section-head"><h2 style="font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;">${os.length} checklists de entrada</h2><button class="btn btn-primary btn-sm" id="novoChecklistBtn">+ Novo Checklist / Cliente</button></div><div class="card" style="margin:14px 0;padding:14px;display:flex;justify-content:space-between;align-items:center;"><span style="font-size:13px;color:var(--muted);">Lucro total estimado</span><span style="font-size:18px;font-weight:700;color:${lucroTotal>=0?'#16a34a':'var(--critical)'};">${fmtMoney(lucroTotal)}</span></div><div class="card" style="padding:0;overflow:hidden;">${rowsHtml}</div>`;
+  document.getElementById('novoChecklistBtn').addEventListener('click', function(){ openOsForm(); });
+  document.querySelectorAll('#content [data-os]').forEach(function(card){ card.addEventListener('click', function(){ openOsDetail(card.dataset.os); }); });
+}
 async function renderOS(){
   const [os, clientes, usuarios] = await Promise.all([sbSelect('ordens_servico'), sbSelect('clientes'), sbSelect('usuarios')]);
   state.cache.os = os; state.cache.clientes = clientes; state.cache.usuarios = usuarios;
