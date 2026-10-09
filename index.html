@@ -255,6 +255,16 @@ tbody tr:hover{background:#f9fafb;}
 @media (max-width:420px){
   .login-card{padding:26px 20px;}
 }
+.foto-dropzone{border:2px dashed var(--gridline);border-radius:10px;padding:16px;text-align:center;cursor:pointer;transition:border-color .15s ease,background .15s ease;}
+.foto-dropzone:hover{border-color:var(--brand);background:rgba(37,99,235,.05);}
+.foto-dropzone .foto-dz-icon{font-size:22px;line-height:1;}
+.foto-dropzone .foto-dz-label{font-size:13px;font-weight:600;color:var(--brand);margin-top:6px;}
+.foto-gallery{display:flex;flex-wrap:wrap;gap:10px;}
+.foto-thumb{position:relative;width:76px;height:76px;border-radius:10px;overflow:hidden;border:1px solid var(--gridline);box-shadow:0 1px 3px rgba(0,0,0,.08);transition:transform .15s ease,box-shadow .15s ease;display:block;}
+.foto-thumb:hover{transform:scale(1.05);box-shadow:0 3px 8px rgba(0,0,0,.14);}
+.foto-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+.foto-thumb .foto-rm{position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;background:rgba(17,24,39,.65);color:#fff;border:none;cursor:pointer;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;}
+.foto-thumb .foto-rm:hover{background:var(--critical);}
 </style>
 </head>
 <body>
@@ -2008,14 +2018,14 @@ function openOsForm(simplified){
         <div class="field" style="margin-top:10px;"><label>Observações do checklist</label><textarea id="osChecklistObs" rows="2" placeholder="Ex: celular não está ligando, tela com queimadura..."></textarea></div>
       <div class="field" style="margin-top:10px;">
         <label>Fotos do equipamento (opcional)</label>
-        <input type="file" id="osFotosInput" accept="image/*" capture="environment" multiple style="display:none;">
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <button type="button" class="btn btn-secondary btn-sm" id="osFotosBtn">+ Adicionar foto</button>
-          <span class="hint" style="margin:0;">Tire uma foto ou escolha da galeria para registrar o estado do aparelho</span>
+        <div class="foto-dropzone" id="osFotosDropzone">
+          <div class="foto-dz-icon">&#128247;</div>
+          <div class="foto-dz-label">+ Adicionar foto</div>
+          <div class="hint" style="margin:4px 0 0;">Tire uma foto ou escolha da galeria para registrar o estado do aparelho</div>
         </div>
-        <div id="osFotosPreview" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;"></div>
-      </div>
-      </div>
+        <input type="file" id="osFotosInput" accept="image/*" capture="environment" multiple style="display:none;">
+        <div id="osFotosPreview" class="foto-gallery" style="margin-top:10px;"></div>
+      </div>      </div>
       <div class="os-tab-dados"><div id="osPrecoSection" style="${simplified?'display:none;':''}">
       ${calculadoraPrecoHtml('osNew')}
       <div class="row-flex">
@@ -2043,10 +2053,10 @@ function openOsForm(simplified){
   function renderOsFotosPreview(){
     const cont = document.getElementById('osFotosPreview');
     if(!cont) return;
-    cont.innerHTML = osFotosFiles.map((file,i)=>`<div style="position:relative;width:70px;height:70px;border-radius:8px;overflow:hidden;border:1px solid var(--gridline);"><img src="${URL.createObjectURL(file)}" style="width:100%;height:100%;object-fit:cover;"><button type="button" data-rmfoto="${i}" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:18px;height:18px;line-height:1;cursor:pointer;font-size:12px;">&times;</button></div>`).join('');
+    cont.innerHTML = osFotosFiles.map((file,i)=>`<div class="foto-thumb"><img src="${URL.createObjectURL(file)}"><button type="button" class="foto-rm" data-rmfoto="${i}">&times;</button></div>`).join('');
     cont.querySelectorAll('[data-rmfoto]').forEach(b=> b.addEventListener('click', ()=>{ osFotosFiles.splice(Number(b.dataset.rmfoto),1); renderOsFotosPreview(); }));
   }
-  document.getElementById('osFotosBtn').addEventListener('click', ()=> document.getElementById('osFotosInput').click());
+  document.getElementById('osFotosDropzone').addEventListener('click', ()=> document.getElementById('osFotosInput').click());
   document.getElementById('osFotosInput').addEventListener('change', (e)=>{
     Array.from(e.target.files||[]).forEach(f=> osFotosFiles.push(f));
     e.target.value='';
@@ -2133,7 +2143,7 @@ async function openOsDetail(osId){
           return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--gridline);font-size:13px;"><span>${escapeHtml(it.label)}</span><span class="badge ${badge}"><span class="badge-dot"></span>${lbl}</span></div>`;
         }).join('') : '<div style="color:var(--muted);font-size:12.5px;">Nenhum checklist registrado.</div>'}
         ${o.checklist_observacoes ? `<div class="hint" style="margin-top:8px;"><strong>Observações do checklist:</strong> ${escapeHtml(o.checklist_observacoes)}</div>` : ''}
-      ${(o.fotos_entrada && o.fotos_entrada.length) ? `<div style="margin-top:10px;"><strong style="font-size:12.5px;">Fotos do equipamento:</strong><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;">${o.fotos_entrada.map(url=>`<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:70px;height:70px;object-fit:cover;border-radius:8px;border:1px solid var(--gridline);"></a>`).join('')}</div></div>` : ''}
+      ${(o.fotos_entrada && o.fotos_entrada.length) ? `<div style="margin-top:10px;"><strong style="font-size:12.5px;">&#128247; Fotos do equipamento</strong><div class="foto-gallery" style="margin-top:8px;">${o.fotos_entrada.map(url=>`<a class="foto-thumb" href="${url}" target="_blank" rel="noopener"><img src="${url}" loading="lazy"></a>`).join('')}</div></div>` : ''}
       </div>
       <div class="field"><label>Diagnóstico técnico</label><textarea id="osDiagnostico" rows="2">${escapeHtml(o.diagnostico||'')}</textarea></div>
       <div class="field"><label>Serviço realizado</label><textarea id="osServico" rows="2">${escapeHtml(o.servico_realizado||'')}</textarea></div>
