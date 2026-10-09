@@ -1936,6 +1936,8 @@ function openOsForm(){
   openModal(`
     <div class="modal-header"><h3>Nova Ordem de Serviço</h3><button class="close-x" onclick="closeModal()">&times;</button></div>
     <div class="modal-body">
+      <div class="tabs"><button type="button" class="tab-btn active" data-ostab="dados">Dados do aparelho</button><button type="button" class="tab-btn" data-ostab="checklist">Checklist de entrada</button></div>
+      <div class="os-tab-dados">
       <div class="field"><label>Cliente</label>
         <select id="osCliente"><option value="">Selecione...</option>${clientes.map(c=>`<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('')}</select>
         <div class="hint">Cliente não cadastrado? <a href="#" id="osNovoCliente" style="color:var(--brand);font-weight:600;">Cadastrar rapidamente</a></div>
@@ -1958,11 +1960,13 @@ function openOsForm(){
       </div>
       <div class="field"><label>Acessórios entregues junto</label><input id="osAcessorios" placeholder="Ex: carregador, capa..."></div>
       <div class="field"><label>Defeito relatado pelo cliente</label><textarea id="osDefeito" rows="3"></textarea></div>
-      <div class="card" style="background:#f9fafb;margin:14px 0;">
+      </div>
+      <div class="card" data-ostab="checklist" style="background:#f9fafb;margin:14px 0;display:none;">
         <div class="section-head" style="margin-bottom:10px;"><h2 style="font-size:13px;">Checklist de entrada</h2></div>
         <div id="osChecklistContainer"></div>
         <div class="field" style="margin-top:10px;"><label>Observações do checklist</label><textarea id="osChecklistObs" rows="2" placeholder="Ex: celular não está ligando, tela com queimadura..."></textarea></div>
       </div>
+      <div class="os-tab-dados">
       ${calculadoraPrecoHtml('osNew')}
       <div class="row-flex">
         <div class="field"><label>Valor do orçamento (R$)</label><input id="osOrcamento" type="number" min="0" step="0.01" value="0"></div>
@@ -1970,6 +1974,7 @@ function openOsForm(){
       </div>
       <div class="field"><label>Garantia (dias)</label><input id="osGarantia" type="number" min="0" value="90"></div>
     </div>
+      </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-primary" id="osSalvarBtn">Abrir Ordem de Serviço</button>
@@ -1985,6 +1990,7 @@ function openOsForm(){
   });
   wireCalculadoraPreco('osNew', 'osOrcamento');
   renderOsChecklist(document.getElementById('osTipo').value);
+  document.querySelectorAll('[data-ostab]').forEach(btn=>{ btn.addEventListener('click', ()=>{ document.querySelectorAll('[data-ostab]').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); const tab=btn.dataset.ostab; document.querySelectorAll('.os-tab-dados').forEach(el=> el.style.display = tab==='dados' ? '' : 'none'); const ck=document.querySelector('.card[data-ostab="checklist"]'); if(ck) ck.style.display = tab==='checklist' ? '' : 'none'; }); });
   document.getElementById('osTipo').addEventListener('change', (e)=> renderOsChecklist(e.target.value));
   document.getElementById('osSalvarBtn').addEventListener('click', async ()=>{
     const btn = document.getElementById('osSalvarBtn');
