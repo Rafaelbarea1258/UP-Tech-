@@ -560,8 +560,13 @@ function closeModal(){
   document.getElementById('modalOverlay').classList.remove('open');
   document.getElementById('modalBox').innerHTML = '';
 }
+let __modalMouseDownOnOverlay = false;
+document.getElementById('modalOverlay').addEventListener('mousedown', (e)=>{
+  __modalMouseDownOnOverlay = (e.target.id === 'modalOverlay');
+});
 document.getElementById('modalOverlay').addEventListener('click', (e)=>{
-  if(e.target.id === 'modalOverlay') closeModal();
+  if(e.target.id === 'modalOverlay' && __modalMouseDownOnOverlay) closeModal();
+  __modalMouseDownOnOverlay = false;
 });
 
 async function sbSelect(table, query=''){
