@@ -1921,7 +1921,8 @@ async function renderChecklist(){
     const itens = o.checklist_entrada || [];
     const okCount = itens.filter(function(i){ return i.status==='ok'; }).length;
     const defCount = itens.filter(function(i){ return i.status==='defeito'; }).length;
-    const resumo = itens.length ? (okCount+' OK &middot; '+defCount+' com defeito') : 'Checklist não preenchido';
+    const numFotos = (o.fotos_entrada||[]).length;
+    const resumo = (itens.length ? (okCount+' OK &middot; '+defCount+' com defeito') : 'Checklist não preenchido') + (numFotos ? ' &middot; &#128247; '+numFotos : '');
     const lucro = lucroDaOs(o);
     const lucroCor = lucro >= 0 ? '#16a34a' : 'var(--critical)';
     return '<div class="os-card" data-os="'+o.id+'" style="border-radius:0;border-bottom:1px solid var(--gridline);cursor:pointer;">'
@@ -1971,6 +1972,7 @@ async function renderOS(){
 }
 
 function openOsForm(simplified){
+  let osFotosFiles = [];
   const clientes = state.cache.clientes;
   openModal(`
     <div class="modal-header"><h3>${simplified?'Novo Checklist de Entrada':'Nova Ordem de Serviço'}</h3><button class="close-x" onclick="closeModal()">&times;</button></div>
@@ -2004,6 +2006,15 @@ function openOsForm(simplified){
         <div class="section-head" style="margin-bottom:10px;"><h2 style="font-size:13px;">Checklist de entrada</h2></div>
         <div id="osChecklistContainer"></div>
         <div class="field" style="margin-top:10px;"><label>Observações do checklist</label><textarea id="osChecklistObs" rows="2" placeholder="Ex: celular não está ligando, tela com queimadura..."></textarea></div>
+      <div class="field" style="margin-top:10px;">
+        <label>Fotos do equipamento (opcional)</label>
+        <input type="file" id="osFotosInput" accept="image/*" capture="environment" multiple style="display:none;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <button type="button" class="btn btn-secondary btn-sm" id="osFotosBtn">+ Adicionar foto</button>
+          <span class="hint" style="margin:0;">Tire uma foto ou escolha da galeria para registrar o estado do aparelho</span>
+        </div>
+        <div id="osFotosPreview" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;"></div>
+      </div>
       </div>
       <div class="os-tab-dados"><div id="osPrecoSection" style="${simplified?'display:none;':''}">
       ${calculadoraPrecoHtml('osNew')}
@@ -2029,12 +2040,39 @@ function openOsForm(simplified){
   });
   wireCalculadoraPreco('osNew', 'osOrcamento');
   renderOsChecklist(document.getElementById('osTipo').value);
+  function renderOsFotosPreview(){
+    const cont = document.getElementById('osFotosPreview');
+    if(!cont) return;
+    cont.innerHTML = osFotosFiles.map((file,i)=>`<div style="position:relative;width:70px;height:70px;border-radius:8px;overflow:hidden;border:1px solid var(--gridline);"><img src="${URL.createObjectURL(file)}" style="width:100%;height:100%;object-fit:cover;"><button type="button" data-rmfoto="${i}" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:18px;height:18px;line-height:1;cursor:pointer;font-size:12px;">&times;</button></div>`).join('');
+    cont.querySelectorAll('[data-rmfoto]').forEach(b=> b.addEventListener('click', ()=>{ osFotosFiles.splice(Number(b.dataset.rmfoto),1); renderOsFotosPreview(); }));
+  }
+  document.getElementById('osFotosBtn').addEventListener('click', ()=> document.getElementById('osFotosInput').click());
+  document.getElementById('osFotosInput').addEventListener('change', (e)=>{
+    Array.from(e.target.files||[]).forEach(f=> osFotosFiles.push(f));
+    e.target.value='';
+    renderOsFotosPreview();
+  });
   document.querySelectorAll('[data-ostab]').forEach(btn=>{ btn.addEventListener('click', ()=>{ document.querySelectorAll('[data-ostab]').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); const tab=btn.dataset.ostab; document.querySelectorAll('.os-tab-dados').forEach(el=> el.style.display = tab==='dados' ? '' : 'none'); const ck=document.querySelector('.card[data-ostab="checklist"]'); if(ck) ck.style.display = tab==='checklist' ? '' : 'none'; }); });
   document.getElementById('osTipo').addEventListener('change', (e)=> renderOsChecklist(e.target.value));
   document.getElementById('osSalvarBtn').addEventListener('click', async ()=>{
     const btn = document.getElementById('osSalvarBtn');
     btn.disabled = true; btn.textContent = 'Salvando...';
     try{
+      let fotosUrls = [];
+      if(osFotosFiles.length){
+        btn.textContent = 'Enviando fotos...';
+        const pastaFotos = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now()+'-'+Math.random().toString(36).slice(2));
+        for(let i=0;i<osFotosFiles.length;i++){
+          const file = osFotosFiles[i];
+          const ext = (file.name.split('.').pop()||'jpg').toLowerCase();
+          const caminho = `${pastaFotos}/${Date.now()}_${i}.${ext}`;
+          const { error: fotoErr } = await sb.storage.from('fotos-equipamentos').upload(caminho, file);
+          if(fotoErr) throw fotoErr;
+          const { data: pub } = sb.storage.from('fotos-equipamentos').getPublicUrl(caminho);
+          fotosUrls.push(pub.publicUrl);
+        }
+        btn.textContent = 'Salvando...';
+      }
       const payload = {
         cliente_id: document.getElementById('osCliente').value || null,
         tecnico_id: document.getElementById('osTecnico').value || null,
@@ -2050,6 +2088,7 @@ function openOsForm(simplified){
         garantia_dias: Number(document.getElementById('osGarantia').value)||0,
         checklist_entrada: coletarOsChecklist(),
         checklist_observacoes: document.getElementById('osChecklistObs').value.trim(),
+        fotos_entrada: fotosUrls,
         status: 'aguardando_diagnostico',
       };
       const { error } = await sb.from('ordens_servico').insert(payload);
@@ -2060,7 +2099,7 @@ function openOsForm(simplified){
     }catch(err){
       console.error(err); toast('Erro ao salvar: '+err.message, 'err');
     }finally{
-      btn.disabled = false; btn.textContent = 'Abrir Ordem de Serviço';
+      btn.disabled = false; btn.textContent = simplified?'Salvar Checklist':'Abrir Ordem de Serviço';
     }
   });
 }
@@ -2094,6 +2133,7 @@ async function openOsDetail(osId){
           return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--gridline);font-size:13px;"><span>${escapeHtml(it.label)}</span><span class="badge ${badge}"><span class="badge-dot"></span>${lbl}</span></div>`;
         }).join('') : '<div style="color:var(--muted);font-size:12.5px;">Nenhum checklist registrado.</div>'}
         ${o.checklist_observacoes ? `<div class="hint" style="margin-top:8px;"><strong>Observações do checklist:</strong> ${escapeHtml(o.checklist_observacoes)}</div>` : ''}
+      ${(o.fotos_entrada && o.fotos_entrada.length) ? `<div style="margin-top:10px;"><strong style="font-size:12.5px;">Fotos do equipamento:</strong><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;">${o.fotos_entrada.map(url=>`<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:70px;height:70px;object-fit:cover;border-radius:8px;border:1px solid var(--gridline);"></a>`).join('')}</div></div>` : ''}
       </div>
       <div class="field"><label>Diagnóstico técnico</label><textarea id="osDiagnostico" rows="2">${escapeHtml(o.diagnostico||'')}</textarea></div>
       <div class="field"><label>Serviço realizado</label><textarea id="osServico" rows="2">${escapeHtml(o.servico_realizado||'')}</textarea></div>
