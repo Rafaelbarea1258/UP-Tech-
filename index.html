@@ -2101,11 +2101,12 @@ function openOsForm(simplified){
         fotos_entrada: fotosUrls,
         status: 'aguardando_diagnostico',
       };
-      const { error } = await sb.from('ordens_servico').insert(payload);
+      const { data: novaOs, error } = await sb.from('ordens_servico').insert(payload).select().single();
       if(error) throw error;
       toast('Ordem de serviço criada com sucesso!', 'ok');
       closeModal();
       navigate('os');
+      if(novaOs && novaOs.id) openOsDetail(novaOs.id);
     }catch(err){
       console.error(err); toast('Erro ao salvar: '+err.message, 'err');
     }finally{
@@ -2176,6 +2177,7 @@ async function openOsDetail(osId){
     <div class="modal-footer" style="flex-wrap:wrap;">
       <button class="btn btn-danger" id="osCancelarBtn">Cancelar OS</button>
       <button class="btn btn-secondary" id="osLinkBtn">Copiar link para o cliente</button>
+      <button class="btn btn-secondary" id="osComandaBtn">&#128424;&#65039; Imprimir comanda</button>
       <button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
       <button class="btn btn-primary" id="osSalvarDetailBtn">Salvar alterações</button>
     </div>
@@ -2183,6 +2185,7 @@ async function openOsDetail(osId){
 
   wireCalculadoraPreco('osDet', 'osOrcamentoEdit');
   document.getElementById('osLinkBtn').addEventListener('click', ()=> copiarLinkOrcamento('os', osId));
+  document.getElementById('osComandaBtn').addEventListener('click', ()=> imprimirComandaOS(cliente, o));
 
   document.getElementById('osAddPeca').addEventListener('click', async ()=>{
     const sel = document.getElementById('osPecaSelect');
@@ -2962,6 +2965,60 @@ function exportarComprovanteGarantia(cliente, os){
   win.document.write(html);
   win.document.close();
 }
+
+function imprimirComandaOS(cliente, os){
+  const win = window.open('', '_blank', 'width=420,height=700');
+  if(!win){ toast('Não foi possível abrir a janela de impressão — verifique o bloqueador de pop-ups do navegador.', 'err'); return; }
+  const via = (label)=>{
+    const aparelho = [os.tipo_aparelho, os.marca, os.modelo].filter(Boolean).join(' ').trim();
+    return `
+      <div class="via">
+        <div class="center store">UpTECH</div>
+        <div class="center sub">Celulares e Computadores</div>
+        <div class="tag">${label}</div>
+        <div class="big-num">OS #${os.numero}</div>
+        <div class="lbl">Cliente</div>
+        <div class="val">${escapeHtml(cliente?.nome || 'não identificado')}</div>
+        <div class="lbl">Aparelho</div>
+        <div class="val">${escapeHtml(aparelho || os.tipo_aparelho || '-')}</div>
+        ${os.imei ? `<div class="lbl">IMEI</div><div class="val">${escapeHtml(os.imei)}</div>` : ''}
+        <div class="lbl">Defeito relatado</div>
+        <div class="val">${escapeHtml(os.defeito_relatado || '-')}</div>
+        <div class="lbl">Entrada</div>
+        <div class="val">${fmtDateTime(os.data_entrada || os.created_at)}</div>
+        ${os.data_previsao ? `<div class="lbl">Previsão</div><div class="val">${fmtDate(os.data_previsao)}</div>` : ''}
+      </div>`;
+  };
+  const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<title>Comanda OS #${os.numero} - UpTECH</title>
+<style>
+  *{box-sizing:border-box;}
+  @page{ size:58mm auto; margin:0; }
+  body{ width:58mm; margin:0 auto; padding:0; font-family:'Courier New', monospace; color:#000; }
+  .via{ width:58mm; padding:3mm 3mm 4mm; }
+  .center{ text-align:center; }
+  .store{ font-size:13px; font-weight:700; letter-spacing:0.5px; }
+  .sub{ font-size:9px; }
+  .tag{ font-size:9px; text-align:center; font-weight:700; background:#000; color:#fff; padding:2px 0; margin:6px 0 4px; }
+  .big-num{ font-size:22px; font-weight:700; text-align:center; margin:2px 0 6px; }
+  .lbl{ font-size:8.5px; text-transform:uppercase; font-weight:700; margin-top:3px; }
+  .val{ font-size:11px; margin-bottom:2px; word-break:break-word; }
+  .cut{ text-align:center; font-size:9px; padding:6px 0; }
+  .print-bar{ text-align:center; padding:10px; }
+  .print-bar button{ background:#2a78d6; color:#fff; border:none; border-radius:8px; padding:10px 18px; font-size:14px; font-weight:600; cursor:pointer; }
+  @media print{ .print-bar{ display:none; } }
+</style></head><body>
+  <div class="print-bar"><button onclick="window.print()">Imprimir comanda</button></div>
+  ${via('ETIQUETA DO APARELHO')}
+  <div class="cut">&#9986; - - - - - - - - - corte aqui - - - - - - - - - &#9986;</div>
+  ${via('CANHOTO DO CLIENTE')}
+</body></html>`;
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+  setTimeout(()=>{ try{ win.focus(); win.print(); }catch(e){} }, 400);
+}
+
 
 async function openClienteHistorico(clienteId){
   const cliente = state.cache.clientes.find(c=>c.id===clienteId);
