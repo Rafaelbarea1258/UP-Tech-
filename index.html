@@ -2991,15 +2991,15 @@ function comandaViaHtml(label, cliente, os){
 }
 const COMANDA_VIA_CSS = `
   *{box-sizing:border-box;}
-  .via{ width:58mm; padding:3mm 3mm 4mm; font-family:'Courier New', monospace; color:#000; background:#fff; }
+  .via{ width:58mm; padding:3mm 3mm 4mm; font-family:Arial, 'Helvetica Neue', sans-serif; color:#000; background:#fff; }
   .center{ text-align:center; }
-  .store{ font-size:13px; font-weight:700; letter-spacing:0.5px; }
-  .sub{ font-size:9px; }
-  .tag{ font-size:9px; text-align:center; font-weight:700; background:#000; color:#fff; padding:2px 0; margin:6px 0 4px; }
-  .big-num{ font-size:22px; font-weight:700; text-align:center; margin:2px 0 6px; }
-  .lbl{ font-size:8.5px; text-transform:uppercase; font-weight:700; margin-top:3px; }
-  .val{ font-size:11px; margin-bottom:2px; word-break:break-word; }
-  .cut{ text-align:center; font-size:9px; padding:6px 0; }
+  .store{ font-size:17px; font-weight:900; letter-spacing:0.5px; }
+  .sub{ font-size:11px; font-weight:600; }
+  .tag{ font-size:12px; text-align:center; font-weight:900; background:#000; color:#fff; padding:3px 0; margin:8px 0 6px; letter-spacing:0.5px; }
+  .big-num{ font-size:32px; font-weight:900; text-align:center; margin:2px 0 8px; }
+  .lbl{ font-size:11px; text-transform:uppercase; font-weight:900; margin-top:5px; }
+  .val{ font-size:15px; font-weight:700; margin-bottom:3px; word-break:break-word; }
+  .cut{ text-align:center; font-size:11px; font-weight:700; padding:7px 0; }
 `;
 function imprimirComandaOS(cliente, os){
   const win = window.open('', '_blank', 'width=420,height=700');
@@ -3041,7 +3041,16 @@ async function baixarComandaImagemOS(cliente, os){
     ${comandaViaHtml('CANHOTO DO CLIENTE', cliente, os)}`;
   document.body.appendChild(wrapper);
   try{
-    const canvas = await html2canvas(wrapper, { scale: 3, backgroundColor: '#ffffff' });
+    const canvas = await html2canvas(wrapper, { scale: 4, backgroundColor: '#ffffff' });
+    const ctx = canvas.getContext('2d');
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const d = imgData.data;
+    for(let i=0; i<d.length; i+=4){
+      const lum = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+      const v = lum < 190 ? 0 : 255;
+      d[i] = v; d[i+1] = v; d[i+2] = v;
+    }
+    ctx.putImageData(imgData, 0, 0);
     const dataUrl = canvas.toDataURL('image/png');
     const win = window.open('', '_blank');
     if(win){
