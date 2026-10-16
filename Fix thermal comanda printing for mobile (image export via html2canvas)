@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>UpTECH - Sistema de Gestão</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <style>
 :root{
   color-scheme: light;
@@ -2178,6 +2179,7 @@ async function openOsDetail(osId){
       <button class="btn btn-danger" id="osCancelarBtn">Cancelar OS</button>
       <button class="btn btn-secondary" id="osLinkBtn">Copiar link para o cliente</button>
       <button class="btn btn-secondary" id="osComandaBtn">&#128424;&#65039; Imprimir comanda</button>
+      <button class="btn btn-secondary" id="osComandaImgBtn">&#128247; Baixar imagem (celular)</button>
       <button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
       <button class="btn btn-primary" id="osSalvarDetailBtn">Salvar alterações</button>
     </div>
@@ -2186,6 +2188,7 @@ async function openOsDetail(osId){
   wireCalculadoraPreco('osDet', 'osOrcamentoEdit');
   document.getElementById('osLinkBtn').addEventListener('click', ()=> copiarLinkOrcamento('os', osId));
   document.getElementById('osComandaBtn').addEventListener('click', ()=> imprimirComandaOS(cliente, o));
+  document.getElementById('osComandaImgBtn').addEventListener('click', ()=> baixarComandaImagemOS(cliente, o));
 
   document.getElementById('osAddPeca').addEventListener('click', async ()=>{
     const sel = document.getElementById('osPecaSelect');
@@ -2966,36 +2969,29 @@ function exportarComprovanteGarantia(cliente, os){
   win.document.close();
 }
 
-function imprimirComandaOS(cliente, os){
-  const win = window.open('', '_blank', 'width=420,height=700');
-  if(!win){ toast('Não foi possível abrir a janela de impressão — verifique o bloqueador de pop-ups do navegador.', 'err'); return; }
-  const via = (label)=>{
-    const aparelho = [os.tipo_aparelho, os.marca, os.modelo].filter(Boolean).join(' ').trim();
-    return `
-      <div class="via">
-        <div class="center store">UpTECH</div>
-        <div class="center sub">Celulares e Computadores</div>
-        <div class="tag">${label}</div>
-        <div class="big-num">OS #${os.numero}</div>
-        <div class="lbl">Cliente</div>
-        <div class="val">${escapeHtml(cliente?.nome || 'não identificado')}</div>
-        <div class="lbl">Aparelho</div>
-        <div class="val">${escapeHtml(aparelho || os.tipo_aparelho || '-')}</div>
-        ${os.imei ? `<div class="lbl">IMEI</div><div class="val">${escapeHtml(os.imei)}</div>` : ''}
-        <div class="lbl">Defeito relatado</div>
-        <div class="val">${escapeHtml(os.defeito_relatado || '-')}</div>
-        <div class="lbl">Entrada</div>
-        <div class="val">${fmtDateTime(os.data_entrada || os.created_at)}</div>
-        ${os.data_previsao ? `<div class="lbl">Previsão</div><div class="val">${fmtDate(os.data_previsao)}</div>` : ''}
-      </div>`;
-  };
-  const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<title>Comanda OS #${os.numero} - UpTECH</title>
-<style>
+function comandaViaHtml(label, cliente, os){
+  const aparelho = [os.tipo_aparelho, os.marca, os.modelo].filter(Boolean).join(' ').trim();
+  return `
+    <div class="via">
+      <div class="center store">UpTECH</div>
+      <div class="center sub">Celulares e Computadores</div>
+      <div class="tag">${label}</div>
+      <div class="big-num">OS #${os.numero}</div>
+      <div class="lbl">Cliente</div>
+      <div class="val">${escapeHtml(cliente?.nome || 'não identificado')}</div>
+      <div class="lbl">Aparelho</div>
+      <div class="val">${escapeHtml(aparelho || os.tipo_aparelho || '-')}</div>
+      ${os.imei ? `<div class="lbl">IMEI</div><div class="val">${escapeHtml(os.imei)}</div>` : ''}
+      <div class="lbl">Defeito relatado</div>
+      <div class="val">${escapeHtml(os.defeito_relatado || '-')}</div>
+      <div class="lbl">Entrada</div>
+      <div class="val">${fmtDateTime(os.data_entrada || os.created_at)}</div>
+      ${os.data_previsao ? `<div class="lbl">Previsão</div><div class="val">${fmtDate(os.data_previsao)}</div>` : ''}
+    </div>`;
+}
+const COMANDA_VIA_CSS = `
   *{box-sizing:border-box;}
-  @page{ size:58mm auto; margin:0; }
-  body{ width:58mm; margin:0 auto; padding:0; font-family:'Courier New', monospace; color:#000; }
-  .via{ width:58mm; padding:3mm 3mm 4mm; }
+  .via{ width:58mm; padding:3mm 3mm 4mm; font-family:'Courier New', monospace; color:#000; background:#fff; }
   .center{ text-align:center; }
   .store{ font-size:13px; font-weight:700; letter-spacing:0.5px; }
   .sub{ font-size:9px; }
@@ -3004,19 +3000,67 @@ function imprimirComandaOS(cliente, os){
   .lbl{ font-size:8.5px; text-transform:uppercase; font-weight:700; margin-top:3px; }
   .val{ font-size:11px; margin-bottom:2px; word-break:break-word; }
   .cut{ text-align:center; font-size:9px; padding:6px 0; }
+`;
+function imprimirComandaOS(cliente, os){
+  const win = window.open('', '_blank', 'width=420,height=700');
+  if(!win){ toast('Não foi possível abrir a janela de impressão — verifique o bloqueador de pop-ups do navegador.', 'err'); return; }
+  const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<title>Comanda OS #${os.numero} - UpTECH</title>
+<style>
+  ${COMANDA_VIA_CSS}
+  body{ width:58mm; margin:0 auto; padding:0; }
+  @page{ size:58mm auto; margin:0; }
   .print-bar{ text-align:center; padding:10px; }
   .print-bar button{ background:#2a78d6; color:#fff; border:none; border-radius:8px; padding:10px 18px; font-size:14px; font-weight:600; cursor:pointer; }
   @media print{ .print-bar{ display:none; } }
 </style></head><body>
   <div class="print-bar"><button onclick="window.print()">Imprimir comanda</button></div>
-  ${via('ETIQUETA DO APARELHO')}
+  ${comandaViaHtml('ETIQUETA DO APARELHO', cliente, os)}
   <div class="cut">&#9986; - - - - - - - - - corte aqui - - - - - - - - - &#9986;</div>
-  ${via('CANHOTO DO CLIENTE')}
+  ${comandaViaHtml('CANHOTO DO CLIENTE', cliente, os)}
 </body></html>`;
   win.document.open();
   win.document.write(html);
   win.document.close();
   setTimeout(()=>{ try{ win.focus(); win.print(); }catch(e){} }, 400);
+}
+
+async function baixarComandaImagemOS(cliente, os){
+  if(typeof html2canvas === 'undefined'){
+    toast('Não foi possível carregar o gerador de imagem. Verifique sua conexão com a internet e tente novamente.', 'err');
+    return;
+  }
+  const wrapper = document.createElement('div');
+  wrapper.style.position = 'fixed';
+  wrapper.style.left = '-9999px';
+  wrapper.style.top = '0';
+  wrapper.style.background = '#fff';
+  wrapper.innerHTML = `<style>${COMANDA_VIA_CSS}</style>
+    ${comandaViaHtml('ETIQUETA DO APARELHO', cliente, os)}
+    <div class="cut">&#9986; - - - - - - - - - corte aqui - - - - - - - - - &#9986;</div>
+    ${comandaViaHtml('CANHOTO DO CLIENTE', cliente, os)}`;
+  document.body.appendChild(wrapper);
+  try{
+    const canvas = await html2canvas(wrapper, { scale: 3, backgroundColor: '#ffffff' });
+    const dataUrl = canvas.toDataURL('image/png');
+    const win = window.open('', '_blank');
+    if(win){
+      win.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>Comanda OS #${os.numero} - Imagem</title></head>
+        <body style="margin:0;background:#e9e9e9;display:flex;flex-direction:column;align-items:center;padding:14px;font-family:sans-serif;">
+          <p style="font-size:13px;color:#333;text-align:center;margin:0 0 10px;">Toque e segure na imagem abaixo para salvar, depois abra seu app de impressão e escolha a foto salva.</p>
+          <img src="${dataUrl}" style="max-width:100%;border:1px solid #ccc;background:#fff;" alt="Comanda OS #${os.numero}">
+        </body></html>`);
+      win.document.close();
+    } else {
+      toast('Não foi possível abrir a imagem — verifique o bloqueador de pop-ups do navegador.', 'err');
+    }
+  }catch(err){
+    console.error(err);
+    toast('Erro ao gerar imagem da comanda: '+err.message, 'err');
+  }finally{
+    document.body.removeChild(wrapper);
+  }
 }
 
 
