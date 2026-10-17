@@ -2969,19 +2969,20 @@ function exportarComprovanteGarantia(cliente, os){
   win.document.close();
 }
 
-function comandaViaHtml(label, cliente, os){
+function comandaViaHtml(cliente, os){
   const aparelho = [os.tipo_aparelho, os.marca, os.modelo].filter(Boolean).join(' ').trim();
   return `
     <div class="via">
       <div class="center store">UpTECH</div>
       <div class="center sub">Celulares e Computadores</div>
-      <div class="tag">${label}</div>
+      <div class="tag">COMANDA DE SERVIÇO</div>
       <div class="big-num">OS #${os.numero}</div>
       <div class="lbl">Cliente</div>
       <div class="val">${escapeHtml(cliente?.nome || 'não identificado')}</div>
       <div class="lbl">Aparelho</div>
       <div class="val">${escapeHtml(aparelho || os.tipo_aparelho || '-')}</div>
       ${os.imei ? `<div class="lbl">IMEI</div><div class="val">${escapeHtml(os.imei)}</div>` : ''}
+      ${os.senha_aparelho ? `<div class="lbl">Senha do aparelho</div><div class="val">${escapeHtml(os.senha_aparelho)}</div>` : ''}
       <div class="lbl">Defeito relatado</div>
       <div class="val">${escapeHtml(os.defeito_relatado || '-')}</div>
       <div class="lbl">Entrada</div>
@@ -3015,9 +3016,7 @@ function imprimirComandaOS(cliente, os){
   @media print{ .print-bar{ display:none; } }
 </style></head><body>
   <div class="print-bar"><button onclick="window.print()">Imprimir comanda</button></div>
-  ${comandaViaHtml('ETIQUETA DO APARELHO', cliente, os)}
-  <div class="cut">&#9986; - - - - - - - - - corte aqui - - - - - - - - - &#9986;</div>
-  ${comandaViaHtml('CANHOTO DO CLIENTE', cliente, os)}
+  ${comandaViaHtml(cliente, os)}
 </body></html>`;
   win.document.open();
   win.document.write(html);
@@ -3035,10 +3034,7 @@ async function baixarComandaImagemOS(cliente, os){
   wrapper.style.left = '-9999px';
   wrapper.style.top = '0';
   wrapper.style.background = '#fff';
-  wrapper.innerHTML = `<style>${COMANDA_VIA_CSS}</style>
-    ${comandaViaHtml('ETIQUETA DO APARELHO', cliente, os)}
-    <div class="cut">&#9986; - - - - - - - - - corte aqui - - - - - - - - - &#9986;</div>
-    ${comandaViaHtml('CANHOTO DO CLIENTE', cliente, os)}`;
+  wrapper.innerHTML = `<style>${COMANDA_VIA_CSS}</style>${comandaViaHtml(cliente, os)}`;
   document.body.appendChild(wrapper);
   try{
     const canvas = await html2canvas(wrapper, { scale: 4, backgroundColor: '#ffffff' });
