@@ -412,6 +412,7 @@ function orcStatusInfo(key){ return ORC_STATUS.find(s=>s.key===key) || ORC_STATU
 
 const CATEGORIAS = [
   {key:'celular', label:'Celular'},
+  {key:'tablet', label:'Tablet'},
   {key:'computador', label:'Computador'},
   {key:'acessorio', label:'Acessório'},
   {key:'peca', label:'Peça'},
@@ -2328,7 +2329,7 @@ async function renderEstoque(){
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Produto</th><th>Categoria</th><th>Marca/Modelo</th><th>Custo</th><th>Preço venda</th><th>Estoque</th><th>Última entrada</th><th></th></tr></thead>
+        <thead><tr><th>Código</th><th>Produto</th><th>Categoria</th><th>Marca/Modelo</th><th>Custo</th><th>Preço venda</th><th>Estoque</th><th>Última entrada</th><th></th></tr></thead>
         <tbody id="estBody"></tbody>
       </table>
     </div>
@@ -2344,6 +2345,7 @@ async function renderEstoque(){
       const ult = ultimaEntradaPorProduto[p.id];
       return `
       <tr>
+        <td style="color:var(--muted);">${p.codigo?String(p.codigo).padStart(2,'0'):'-'}</td>
         <td><strong>${escapeHtml(p.nome)}</strong>${p.imei?`<div style="font-size:11px;color:var(--muted)">IMEI: ${escapeHtml(p.imei)}</div>`:''}</td>
         <td style="text-transform:capitalize">${escapeHtml(p.categoria)}</td>
         <td>${escapeHtml(p.marca||'-')} ${escapeHtml(p.modelo||'')}</td>
@@ -2357,7 +2359,7 @@ async function renderEstoque(){
           <button class="btn btn-ghost btn-sm" data-del="${p.id}" style="color:var(--critical)">Excluir</button>
         </td>
       </tr>`;
-    }).join('') : `<tr class="empty-row"><td colspan="8">Nenhum produto encontrado.</td></tr>`;
+    }).join('') : `<tr class="empty-row"><td colspan="9">Nenhum produto encontrado.</td></tr>`;
     body.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click', ()=> openProdutoForm(produtos.find(p=>p.id===b.dataset.edit))));
     body.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click', async ()=>{
       if(!confirm('Remover este produto do estoque ativo?')) return;
@@ -2693,7 +2695,7 @@ function wirePrecoCalc(isEditMode){
 function openProdutoForm(produto){
   const isEdit = !!produto;
   openModal(`
-    <div class="modal-header"><h3>${isEdit?'Editar produto':'Novo produto'}</h3><button class="close-x" onclick="closeModal()">&times;</button></div>
+    <div class="modal-header"><h3>${isEdit?('Editar produto'+(produto.codigo?' #'+String(produto.codigo).padStart(2,'0'):'')):'Novo produto'}</h3><button class="close-x" onclick="closeModal()">&times;</button></div>
     <div class="modal-body">
       <div class="field"><label>Nome do produto</label><input id="pNome" value="${escapeHtml(produto?.nome||'')}" placeholder="Ex: iPhone 13 128GB"></div>
       <div class="row-flex">
@@ -2727,6 +2729,9 @@ function openProdutoForm(produto){
   document.getElementById('pSalvarBtn').addEventListener('click', async ()=>{
     const nome = document.getElementById('pNome').value.trim();
     if(!nome){ toast('Informe o nome do produto', 'err'); return; }
+    const nomeNorm = norm(nome);
+    const duplicado = (state.cache.produtos||[]).some(p => p.ativo !== false && norm(p.nome) === nomeNorm && (!isEdit || p.id !== produto.id));
+    if(duplicado){ toast('Já existe um produto cadastrado com esse nome. Edite o produto existente em vez de duplicar.', 'err'); return; }
     const btn = document.getElementById('pSalvarBtn');
     btn.disabled = true; btn.textContent = 'Salvando...';
     const payload = {
