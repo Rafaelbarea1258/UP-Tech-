@@ -423,7 +423,15 @@ const CARCACA_CATEGORIAS = [
   {key:'celular', label:'Celular'},
   {key:'tablet', label:'Tablet'},
   {key:'computador', label:'Computador'},
+  {key:'notebook', label:'Notebook'},
 ];
+
+const PRESET_ITENS_CARCACA = {
+  celular: ['Conector de carga', 'Placa', 'Bateria', 'Tela'],
+  tablet: ['Conector de carga', 'Placa', 'Bateria', 'Tela'],
+  computador: ['Placa-mãe', 'Cooler', 'Pilha da BIOS', 'Processador', 'Memória RAM', 'Fonte', 'Dissipador', 'Placa de vídeo'],
+  notebook: ['Placa-mãe', 'Processador', 'Pilha da BIOS', 'Bateria', 'Memória RAM', 'Tela', 'Mouse', 'Trackpad'],
+};
 
 /* ---------------- Helpers ---------------- */
 function fmtMoney(v){ return (Number(v)||0).toLocaleString('pt-BR', {style:'currency', currency:'BRL'}); }
@@ -2495,6 +2503,11 @@ function carcItemRowHtml(nome, funcionando){
   </div>`;
 }
 
+function carcPresetsHtml(categoria){
+  const presets = PRESET_ITENS_CARCACA[categoria] || [];
+  return presets.map(nome=>`<button type="button" class="btn btn-ghost btn-sm carc-preset-chip" data-preset="${escapeHtml(nome)}" style="border:1px solid var(--gridline);">+ ${escapeHtml(nome)}</button>`).join('');
+}
+
 function openCarcacaForm(carcaca){
   const isEdit = !!carcaca;
   const itens = (isEdit && Array.isArray(carcaca.itens)) ? carcaca.itens : [];
@@ -2510,6 +2523,8 @@ function openCarcacaForm(carcaca){
       <div class="field"><label>Defeito</label><textarea id="carcDefeito" rows="2" placeholder="Ex: Tela quebrada, não liga...">${escapeHtml(carcaca?.defeito||'')}</textarea></div>
       <div class="field">
         <label>Itens / peças aproveitáveis</label>
+        <div class="hint">Toque para adicionar rapidamente:</div>
+        <div id="carcPresetWrap" style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px;">${carcPresetsHtml(carcaca?.categoria || CARCACA_CATEGORIAS[0].key)}</div>
         <div id="carcItensList">${itens.map(it=>carcItemRowHtml(it.nome, it.funcionando)).join('')}</div>
         <a href="#" id="carcAddItem" style="color:var(--brand);font-weight:600;font-size:13px;">+ Adicionar item</a>
       </div>
@@ -2527,10 +2542,41 @@ function openCarcacaForm(carcaca){
   }
   function wireRemove(){
     document.querySelectorAll('.carc-item-remove').forEach(btn=>{
-      btn.onclick = ()=> btn.closest('.carc-item-row').remove();
+      btn.onclick = ()=>{ btn.closest('.carc-item-row').remove(); updatePresetHighlight(); };
     });
   }
   wireRemove();
+  function wirePresets(){
+    document.querySelectorAll('.carc-preset-chip').forEach(btn=>{
+      btn.onclick = ()=>{
+        const nome = btn.dataset.preset;
+        const existing = Array.from(document.querySelectorAll('.carc-item-nome')).find(inp=>norm(inp.value)===norm(nome));
+        if(existing){
+          existing.closest('.carc-item-row').remove();
+        } else {
+          document.getElementById('carcItensList').insertAdjacentHTML('beforeend', carcItemRowHtml(nome, true));
+          wireRemove();
+        }
+        updatePresetHighlight();
+      };
+    });
+  }
+  function updatePresetHighlight(){
+    const nomes = Array.from(document.querySelectorAll('.carc-item-nome')).map(inp=>norm(inp.value));
+    document.querySelectorAll('.carc-preset-chip').forEach(btn=>{
+      const ativo = nomes.includes(norm(btn.dataset.preset));
+      btn.style.background = ativo ? 'var(--brand)' : '';
+      btn.style.color = ativo ? '#fff' : '';
+      btn.style.borderColor = ativo ? 'var(--brand)' : 'var(--gridline)';
+    });
+  }
+  wirePresets();
+  updatePresetHighlight();
+  document.getElementById('carcCategoriaForm').addEventListener('change', ()=>{
+    document.getElementById('carcPresetWrap').innerHTML = carcPresetsHtml(document.getElementById('carcCategoriaForm').value);
+    wirePresets();
+    updatePresetHighlight();
+  });
   document.getElementById('carcAddItem').addEventListener('click', (e)=>{
     e.preventDefault();
     document.getElementById('carcItensList').insertAdjacentHTML('beforeend', carcItemRowHtml('', true));
