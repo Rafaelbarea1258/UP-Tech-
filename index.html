@@ -2337,7 +2337,7 @@ async function renderEstoque(){
   function draw(){
     const q = norm(document.getElementById('estSearch').value.trim());
     const cat = document.getElementById('estCategoria').value;
-    let list = produtos.filter(p => p.ativo);
+    let list = produtos.filter(p => p.ativo).sort((a,b)=>(a.codigo||0)-(b.codigo||0));
     if(cat) list = list.filter(p=>p.categoria===cat);
     if(q) list = list.filter(p => [p.nome,p.marca,p.modelo,p.codigo_barras].filter(Boolean).some(f=>norm(f).includes(q)));
     const body = document.getElementById('estBody');
