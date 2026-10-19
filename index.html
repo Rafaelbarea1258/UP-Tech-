@@ -312,6 +312,7 @@ tbody tr:hover{background:#f9fafb;}
         <div class="navitem" data-view="os"><span class="ico">&#128295;</span> Ordens de Serviço</div>
         <div class="navitem" data-view="checklist"><span class="ico">&#9989;</span> Checklist</div>
         <div class="navitem" data-view="estoque"><span class="ico">&#128230;</span> Estoque</div>
+        <div class="navitem" data-view="carcacas"><span class="ico">&#129513;</span> Carcaças</div>
         <div class="navitem" data-view="compras"><span class="ico">&#128722;</span> Compras</div>
         <div class="navitem" data-view="fornecedores"><span class="ico">&#127970;</span> Fornecedores</div>
         <div class="navitem" data-view="clientes"><span class="ico">&#128100;</span> Clientes</div>
@@ -416,6 +417,12 @@ const CATEGORIAS = [
   {key:'computador', label:'Computador'},
   {key:'acessorio', label:'Acessório'},
   {key:'peca', label:'Peça'},
+];
+
+const CARCACA_CATEGORIAS = [
+  {key:'celular', label:'Celular'},
+  {key:'tablet', label:'Tablet'},
+  {key:'computador', label:'Computador'},
 ];
 
 /* ---------------- Helpers ---------------- */
@@ -702,6 +709,7 @@ async function navigate(view, force=false){
       case 'orcamentos': await renderOrcamentos(); break;
       case 'os': await renderOS(); break; case 'checklist': await renderChecklist(); break;
       case 'estoque': await renderEstoque(); break;
+      case 'carcacas': await renderCarcacas(); break;
       case 'compras': await renderCompras(); break;
       case 'fornecedores': await renderFornecedores(); break;
       case 'clientes': await renderClientes(); break;
@@ -2419,6 +2427,133 @@ function abrirEntradaEstoqueModal(produto, ultima){
         toast('Erro: '+err.message, 'err');
       }
       btn.disabled=false; btn.textContent='Registrar entrada';
+    }
+  });
+}
+/* ---------------- CARCAÇAS ---------------- */
+async function renderCarcacas(){
+  const carcacas = await sbSelect('carcacas');
+  state.cache.carcacas = carcacas;
+  document.getElementById('content').innerHTML = `
+    <div class="section-head">
+      <div class="toolbar">
+        <input id="carcSearch" placeholder="Buscar carcaça (modelo, defeito)...">
+        <select id="carcCategoria"><option value="">Todas categorias</option>${CARCACA_CATEGORIAS.map(c=>`<option value="${c.key}">${c.label}</option>`).join('')}</select>
+      </div>
+      <button class="btn btn-primary btn-sm" id="novaCarcacaBtn">+ Nova Carcaça</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Categoria</th><th>Modelo</th><th>Defeito</th><th>Itens</th><th></th></tr></thead>
+        <tbody id="carcBody"></tbody>
+      </table>
+    </div>
+  `;
+  function draw(){
+    const q = norm(document.getElementById('carcSearch').value.trim());
+    const cat = document.getElementById('carcCategoria').value;
+    let list = carcacas.filter(c => c.ativo !== false);
+    if(cat) list = list.filter(c => c.categoria === cat);
+    if(q) list = list.filter(c => [c.modelo, c.defeito, c.observacoes].filter(Boolean).some(f=>norm(f).includes(q)));
+    const body = document.getElementById('carcBody');
+    body.innerHTML = list.length ? list.map(c=>{
+      const itens = Array.isArray(c.itens) ? c.itens : [];
+      const itensHtml = itens.length ? itens.map(it=>`<span class="badge ${it.funcionando?'badge-good':'badge-critical'}"><span class="badge-dot"></span>${escapeHtml(it.nome)}</span>`).join(' ') : '<span style="color:var(--muted);">Sem itens cadastrados</span>';
+      return `
+      <tr>
+        <td style="text-transform:capitalize">${escapeHtml(c.categoria)}</td>
+        <td><strong>${escapeHtml(c.modelo||'-')}</strong></td>
+        <td style="font-size:12.5px;color:var(--text-secondary);max-width:220px;">${escapeHtml(c.defeito||'-')}</td>
+        <td style="display:flex;flex-wrap:wrap;gap:4px;max-width:320px;">${itensHtml}</td>
+        <td style="text-align:right;white-space:nowrap;">
+          <button class="btn btn-ghost btn-sm" data-edit="${c.id}">Editar</button>
+          <button class="btn btn-ghost btn-sm" data-del="${c.id}" style="color:var(--critical)">Excluir</button>
+        </td>
+      </tr>`;
+    }).join('') : `<tr class="empty-row"><td colspan="5">Nenhuma carcaça cadastrada.</td></tr>`;
+    body.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click', ()=> openCarcacaForm(carcacas.find(c=>c.id===b.dataset.edit))));
+    body.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click', async ()=>{
+      if(!confirm('Remover esta carcaça?')) return;
+      await sb.from('carcacas').update({ativo:false}).eq('id', b.dataset.del);
+      toast('Carcaça removida', 'ok');
+      navigate('carcacas');
+    }));
+  }
+  document.getElementById('carcSearch').addEventListener('input', draw);
+  document.getElementById('carcCategoria').addEventListener('change', draw);
+  document.getElementById('novaCarcacaBtn').addEventListener('click', ()=> openCarcacaForm(null));
+  draw();
+}
+
+function carcItemRowHtml(nome, funcionando){
+  return `<div class="row-flex carc-item-row" style="align-items:center;margin-bottom:6px;">
+    <input class="carc-item-nome" value="${escapeHtml(nome||'')}" placeholder="Ex: Tela, Placa, Bateria, Carcaça traseira..." style="flex:1;">
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap;"><input type="checkbox" class="carc-item-ok" ${funcionando!==false?'checked':''}> Funcionando</label>
+    <button type="button" class="btn btn-ghost btn-sm carc-item-remove" style="color:var(--critical);">&times;</button>
+  </div>`;
+}
+
+function openCarcacaForm(carcaca){
+  const isEdit = !!carcaca;
+  const itens = (isEdit && Array.isArray(carcaca.itens)) ? carcaca.itens : [];
+  openModal(`
+    <div class="modal-header"><h3>${isEdit?'Editar carcaça':'Nova carcaça'}</h3><button class="close-x" onclick="closeModal()">&times;</button></div>
+    <div class="modal-body">
+      <div class="row-flex">
+        <div class="field"><label>Categoria</label>
+          <select id="carcCategoriaForm">${CARCACA_CATEGORIAS.map(c=>`<option value="${c.key}" ${carcaca?.categoria===c.key?'selected':''}>${c.label}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>Modelo/Descrição</label><input id="carcModelo" value="${escapeHtml(carcaca?.modelo||'')}" placeholder="Ex: iPhone 11, Notebook Dell G3..."></div>
+      </div>
+      <div class="field"><label>Defeito</label><textarea id="carcDefeito" rows="2" placeholder="Ex: Tela quebrada, não liga...">${escapeHtml(carcaca?.defeito||'')}</textarea></div>
+      <div class="field">
+        <label>Itens / peças aproveitáveis</label>
+        <div id="carcItensList">${itens.map(it=>carcItemRowHtml(it.nome, it.funcionando)).join('')}</div>
+        <a href="#" id="carcAddItem" style="color:var(--brand);font-weight:600;font-size:13px;">+ Adicionar item</a>
+      </div>
+      <div class="field"><label>Observações</label><textarea id="carcObs" rows="2" placeholder="Opcional">${escapeHtml(carcaca?.observacoes||'')}</textarea></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="carcSalvarBtn">${isEdit?'Salvar alterações':'Cadastrar carcaça'}</button>
+    </div>
+  `);
+  function wireRemove(){
+    document.querySelectorAll('.carc-item-remove').forEach(btn=>{
+      btn.onclick = ()=> btn.closest('.carc-item-row').remove();
+    });
+  }
+  wireRemove();
+  document.getElementById('carcAddItem').addEventListener('click', (e)=>{
+    e.preventDefault();
+    document.getElementById('carcItensList').insertAdjacentHTML('beforeend', carcItemRowHtml('', true));
+    wireRemove();
+  });
+  document.getElementById('carcSalvarBtn').addEventListener('click', async ()=>{
+    const modelo = document.getElementById('carcModelo').value.trim();
+    if(!modelo){ toast('Informe o modelo/descrição da carcaça', 'err'); return; }
+    const btn = document.getElementById('carcSalvarBtn');
+    btn.disabled = true; btn.textContent = 'Salvando...';
+    const payload = {
+      categoria: document.getElementById('carcCategoriaForm').value,
+      modelo,
+      defeito: document.getElementById('carcDefeito').value.trim(),
+      observacoes: document.getElementById('carcObs').value.trim(),
+      itens: Array.from(document.querySelectorAll('.carc-item-row')).map(row=>({
+        nome: row.querySelector('.carc-item-nome').value.trim(),
+        funcionando: row.querySelector('.carc-item-ok').checked
+      })).filter(it=>it.nome)
+    };
+    try{
+      const { error } = isEdit ? await sb.from('carcacas').update(payload).eq('id', carcaca.id) : await sb.from('carcacas').insert([payload]);
+      if(error) throw error;
+      toast(isEdit?'Carcaça atualizada!':'Carcaça cadastrada!');
+      closeModal();
+      navigate('carcacas');
+    }catch(err){
+      console.error(err); toast('Erro: '+err.message, 'err');
+    }finally{
+      btn.disabled = false; btn.textContent = isEdit?'Salvar alterações':'Cadastrar carcaça';
     }
   });
 }
