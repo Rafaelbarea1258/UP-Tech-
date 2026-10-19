@@ -2453,7 +2453,7 @@ async function renderCarcacas(){
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Nº</th><th>Categoria</th><th>Modelo</th><th>Defeito</th><th>Itens</th><th></th></tr></thead>
+        <thead><tr><th>Nº</th><th>Categoria</th><th>Marca/Modelo</th><th>Defeito</th><th>Itens</th><th></th></tr></thead>
         <tbody id="carcBody"></tbody>
       </table>
     </div>
@@ -2463,7 +2463,7 @@ async function renderCarcacas(){
     const cat = document.getElementById('carcCategoria').value;
     let list = carcacas.filter(c => c.ativo !== false).sort((a,b)=>(a.numero||0)-(b.numero||0));
     if(cat) list = list.filter(c => c.categoria === cat);
-    if(q) list = list.filter(c => [c.modelo, c.defeito, c.observacoes].filter(Boolean).some(f=>norm(f).includes(q)));
+    if(q) list = list.filter(c => [c.modelo, c.marca, c.cor, c.defeito, c.observacoes].filter(Boolean).some(f=>norm(f).includes(q)));
     const body = document.getElementById('carcBody');
     body.innerHTML = list.length ? list.map(c=>{
       const itens = Array.isArray(c.itens) ? c.itens : [];
@@ -2472,7 +2472,7 @@ async function renderCarcacas(){
       <tr>
         <td style="color:var(--muted);">${c.numero?String(c.numero).padStart(2,'0'):'-'}</td>
         <td style="text-transform:capitalize">${escapeHtml(c.categoria)}</td>
-        <td><strong>${escapeHtml(c.modelo||'-')}</strong></td>
+        <td><strong>${escapeHtml([c.marca, c.modelo].filter(Boolean).join(' ')||'-')}</strong>${c.cor?`<div style="font-size:11px;color:var(--muted);">Cor: ${escapeHtml(c.cor)}</div>`:''}</td>
         <td style="font-size:12.5px;color:var(--text-secondary);max-width:220px;">${escapeHtml(c.defeito||'-')}</td>
         <td style="display:flex;flex-wrap:wrap;gap:4px;max-width:320px;">${itensHtml}</td>
         <td style="text-align:right;white-space:nowrap;">
@@ -2519,6 +2519,10 @@ function openCarcacaForm(carcaca){
           <select id="carcCategoriaForm">${CARCACA_CATEGORIAS.map(c=>`<option value="${c.key}" ${carcaca?.categoria===c.key?'selected':''}>${c.label}</option>`).join('')}</select>
         </div>
         <div class="field"><label>Modelo/Descrição</label><input id="carcModelo" value="${escapeHtml(carcaca?.modelo||'')}" placeholder="Ex: iPhone 11, Notebook Dell G3..."></div>
+      </div>
+      <div class="row-flex">
+        <div class="field"><label>Marca</label><input id="carcMarca" value="${escapeHtml(carcaca?.marca||'')}" placeholder="Ex: Apple, Samsung, Dell..."></div>
+        <div class="field"><label>Cor</label><input id="carcCor" value="${escapeHtml(carcaca?.cor||'')}" placeholder="Ex: Preto, Branco, Prata..."></div>
       </div>
       <div class="field"><label>Defeito</label><textarea id="carcDefeito" rows="2" placeholder="Ex: Tela quebrada, não liga...">${escapeHtml(carcaca?.defeito||'')}</textarea></div>
       <div class="field">
@@ -2590,6 +2594,8 @@ function openCarcacaForm(carcaca){
     const payload = {
       categoria: document.getElementById('carcCategoriaForm').value,
       modelo,
+      marca: document.getElementById('carcMarca').value.trim(),
+      cor: document.getElementById('carcCor').value.trim(),
       defeito: document.getElementById('carcDefeito').value.trim(),
       observacoes: document.getElementById('carcObs').value.trim(),
       itens: Array.from(document.querySelectorAll('.carc-item-row')).map(row=>({
@@ -2623,6 +2629,7 @@ function carcacaViaHtml(carcaca){
       <div class="val" style="text-transform:capitalize">${escapeHtml(carcaca.categoria||'-')}</div>
       <div class="lbl">Modelo</div>
       <div class="val">${escapeHtml(carcaca.modelo||'-')}</div>
+      ${(carcaca.marca || carcaca.cor) ? `<div class="lbl">Marca/Cor</div><div class="val">${escapeHtml([carcaca.marca, carcaca.cor].filter(Boolean).join(' - '))}</div>` : ''}
       <div class="lbl">Defeito</div>
       <div class="val">${escapeHtml(carcaca.defeito||'-')}</div>
       <div class="lbl">Itens / peças</div>
