@@ -2445,7 +2445,7 @@ async function renderCarcacas(){
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Categoria</th><th>Modelo</th><th>Defeito</th><th>Itens</th><th></th></tr></thead>
+        <thead><tr><th>Nº</th><th>Categoria</th><th>Modelo</th><th>Defeito</th><th>Itens</th><th></th></tr></thead>
         <tbody id="carcBody"></tbody>
       </table>
     </div>
@@ -2453,7 +2453,7 @@ async function renderCarcacas(){
   function draw(){
     const q = norm(document.getElementById('carcSearch').value.trim());
     const cat = document.getElementById('carcCategoria').value;
-    let list = carcacas.filter(c => c.ativo !== false);
+    let list = carcacas.filter(c => c.ativo !== false).sort((a,b)=>(a.numero||0)-(b.numero||0));
     if(cat) list = list.filter(c => c.categoria === cat);
     if(q) list = list.filter(c => [c.modelo, c.defeito, c.observacoes].filter(Boolean).some(f=>norm(f).includes(q)));
     const body = document.getElementById('carcBody');
@@ -2462,6 +2462,7 @@ async function renderCarcacas(){
       const itensHtml = itens.length ? itens.map(it=>`<span class="badge ${it.funcionando?'badge-good':'badge-critical'}"><span class="badge-dot"></span>${escapeHtml(it.nome)}</span>`).join(' ') : '<span style="color:var(--muted);">Sem itens cadastrados</span>';
       return `
       <tr>
+        <td style="color:var(--muted);">${c.numero?String(c.numero).padStart(2,'0'):'-'}</td>
         <td style="text-transform:capitalize">${escapeHtml(c.categoria)}</td>
         <td><strong>${escapeHtml(c.modelo||'-')}</strong></td>
         <td style="font-size:12.5px;color:var(--text-secondary);max-width:220px;">${escapeHtml(c.defeito||'-')}</td>
@@ -2471,7 +2472,7 @@ async function renderCarcacas(){
           <button class="btn btn-ghost btn-sm" data-del="${c.id}" style="color:var(--critical)">Excluir</button>
         </td>
       </tr>`;
-    }).join('') : `<tr class="empty-row"><td colspan="5">Nenhuma carcaça cadastrada.</td></tr>`;
+    }).join('') : `<tr class="empty-row"><td colspan="6">Nenhuma carcaça cadastrada.</td></tr>`;
     body.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click', ()=> openCarcacaForm(carcacas.find(c=>c.id===b.dataset.edit))));
     body.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click', async ()=>{
       if(!confirm('Remover esta carcaça?')) return;
@@ -2516,9 +2517,14 @@ function openCarcacaForm(carcaca){
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      ${isEdit ? `<button class="btn btn-secondary" id="carcImprimirBtn">&#128424;&#65039; Imprimir</button><button class="btn btn-secondary" id="carcImagemBtn">&#128247; Baixar imagem (celular)</button>` : ''}
       <button class="btn btn-primary" id="carcSalvarBtn">${isEdit?'Salvar alterações':'Cadastrar carcaça'}</button>
     </div>
   `);
+  if(isEdit){
+    document.getElementById('carcImprimirBtn').addEventListener('click', ()=> imprimirCarcaca(carcaca));
+    document.getElementById('carcImagemBtn').addEventListener('click', ()=> baixarCarcacaImagem(carcaca));
+  }
   function wireRemove(){
     document.querySelectorAll('.carc-item-remove').forEach(btn=>{
       btn.onclick = ()=> btn.closest('.carc-item-row').remove();
@@ -2557,6 +2563,92 @@ function openCarcacaForm(carcaca){
       btn.disabled = false; btn.textContent = isEdit?'Salvar alterações':'Cadastrar carcaça';
     }
   });
+}
+function carcacaViaHtml(carcaca){
+  const itens = Array.isArray(carcaca.itens) ? carcaca.itens : [];
+  const itensHtml = itens.length ? itens.map(it=>`<div class="val">${it.funcionando?'&#10003;':'&#10007;'} ${escapeHtml(it.nome)}</div>`).join('') : '<div class="val">Nenhum item cadastrado</div>';
+  return `
+    <div class="via">
+      <div class="center store">UpTECH</div>
+      <div class="center sub">Celulares e Computadores</div>
+      <div class="tag">CARCAÇA</div>
+      <div class="big-num">#${carcaca.numero}</div>
+      <div class="lbl">Categoria</div>
+      <div class="val" style="text-transform:capitalize">${escapeHtml(carcaca.categoria||'-')}</div>
+      <div class="lbl">Modelo</div>
+      <div class="val">${escapeHtml(carcaca.modelo||'-')}</div>
+      <div class="lbl">Defeito</div>
+      <div class="val">${escapeHtml(carcaca.defeito||'-')}</div>
+      <div class="lbl">Itens / peças</div>
+      ${itensHtml}
+      ${carcaca.observacoes ? `<div class="lbl">Observações</div><div class="val">${escapeHtml(carcaca.observacoes)}</div>` : ''}
+    </div>`;
+}
+
+function imprimirCarcaca(carcaca){
+  const win = window.open('', '_blank', 'width=420,height=700');
+  if(!win){ toast('Não foi possível abrir a janela de impressão — verifique o bloqueador de pop-ups do navegador.', 'err'); return; }
+  const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<title>Carcaça #${carcaca.numero} - UpTECH</title>
+<style>
+  ${COMANDA_VIA_CSS}
+  body{ width:58mm; margin:0 auto; padding:0; }
+  @page{ size:58mm auto; margin:0; }
+  .print-bar{ text-align:center; padding:10px; }
+  .print-bar button{ background:#2a78d6; color:#fff; border:none; border-radius:8px; padding:10px 18px; font-size:14px; font-weight:600; cursor:pointer; }
+  @media print{ .print-bar{ display:none; } }
+</style></head><body>
+  <div class="print-bar"><button onclick="window.print()">Imprimir</button></div>
+  ${carcacaViaHtml(carcaca)}
+</body></html>`;
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+  setTimeout(()=>{ try{ win.focus(); win.print(); }catch(e){} }, 400);
+}
+
+async function baixarCarcacaImagem(carcaca){
+  if(typeof html2canvas === 'undefined'){
+    toast('Não foi possível carregar o gerador de imagem. Verifique sua conexão com a internet e tente novamente.', 'err');
+    return;
+  }
+  const wrapper = document.createElement('div');
+  wrapper.style.position = 'fixed';
+  wrapper.style.left = '-9999px';
+  wrapper.style.top = '0';
+  wrapper.style.background = '#fff';
+  wrapper.innerHTML = `<style>${COMANDA_VIA_CSS}</style>${carcacaViaHtml(carcaca)}`;
+  document.body.appendChild(wrapper);
+  try{
+    const canvas = await html2canvas(wrapper, { scale: 4, backgroundColor: '#ffffff' });
+    const ctx = canvas.getContext('2d');
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const d = imgData.data;
+    for(let i=0; i<d.length; i+=4){
+      const lum = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+      const v = lum < 190 ? 0 : 255;
+      d[i] = v; d[i+1] = v; d[i+2] = v;
+    }
+    ctx.putImageData(imgData, 0, 0);
+    const dataUrl = canvas.toDataURL('image/png');
+    const win = window.open('', '_blank');
+    if(win){
+      win.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>Carcaça #${carcaca.numero} - Imagem</title></head>
+        <body style="margin:0;background:#e9e9e9;display:flex;flex-direction:column;align-items:center;padding:14px;font-family:sans-serif;">
+          <p style="font-size:13px;color:#333;text-align:center;margin:0 0 10px;">Toque e segure na imagem abaixo para salvar, depois abra seu app de impressão e escolha a foto salva.</p>
+          <img src="${dataUrl}" style="max-width:100%;border:1px solid #ccc;background:#fff;" alt="Carcaça #${carcaca.numero}">
+        </body></html>`);
+      win.document.close();
+    } else {
+      toast('Não foi possível abrir a imagem — verifique o bloqueador de pop-ups do navegador.', 'err');
+    }
+  }catch(err){
+    console.error(err);
+    toast('Erro ao gerar imagem da carcaça: '+err.message, 'err');
+  }finally{
+    document.body.removeChild(wrapper);
+  }
 }
 
 /* ---------------- COMPRAS ---------------- */
