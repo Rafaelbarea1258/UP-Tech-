@@ -1990,8 +1990,14 @@ function openOsForm(simplified){
     <div class="modal-body">
       <div class="tabs"><button type="button" class="tab-btn active" data-ostab="dados">Dados do aparelho</button><button type="button" class="tab-btn" data-ostab="checklist">Checklist de entrada</button></div>
       <div class="os-tab-dados">
-      <div class="field"><label>Cliente</label>
-        <select id="osCliente"><option value="">Selecione...</option>${clientes.map(c=>`<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('')}</select>
+      <div class="field" style="position:relative;"><label>Cliente</label>
+        <div id="osClienteChip" style="display:none;align-items:center;justify-content:space-between;padding:9px 12px;border:1px solid var(--gridline);border-radius:8px;background:#eaf1fc;font-size:13.5px;">
+          <span id="osClienteChipName" style="font-weight:600;color:var(--brand-dark);"></span>
+          <a href="#" id="osClienteTrocar" style="color:var(--brand-dark);font-size:12px;">trocar</a>
+        </div>
+        <input id="osClienteSearch" placeholder="Buscar cliente por nome ou telefone..." autocomplete="off">
+        <input type="hidden" id="osClienteId" value="">
+        <div class="search-results" id="osClienteResults" style="display:none;"></div>
         <div class="hint">Cliente não cadastrado? <a href="#" id="osNovoCliente" style="color:var(--brand);font-weight:600;">Cadastrar rapidamente</a></div>
       </div>
       <div class="row-flex">
@@ -2041,12 +2047,61 @@ function openOsForm(simplified){
       <button class="btn btn-primary" id="osSalvarBtn">${simplified?'Salvar Checklist':'Abrir Ordem de Serviço'}</button>
     </div>
   `);
+  function renderOsClienteResults(list){
+    const el = document.getElementById('osClienteResults');
+    if(!list.length){
+      el.innerHTML = `<div style="padding:12px;color:var(--muted);font-size:13px;">Nenhum cliente encontrado.</div>`;
+    } else {
+      el.innerHTML = list.slice(0,8).map(c=>`
+        <div class="search-result-row" data-pick="${c.id}" style="cursor:pointer;">
+          <div>
+            <div>${escapeHtml(c.nome)}</div>
+            <div style="color:var(--muted);font-size:11.5px;">${escapeHtml(c.telefone||'sem telefone')}</div>
+          </div>
+        </div>`).join('');
+      el.querySelectorAll('[data-pick]').forEach(row=>{
+        row.addEventListener('click', ()=> selectOsCliente(row.dataset.pick));
+      });
+    }
+    el.style.display = 'block';
+  }
+  function selectOsCliente(clienteId){
+    const c = state.cache.clientes.find(x=>x.id===clienteId);
+    if(!c) return;
+    document.getElementById('osClienteId').value = c.id;
+    document.getElementById('osClienteChipName').textContent = c.nome + (c.telefone?(' · '+c.telefone):'');
+    document.getElementById('osClienteChip').style.display = 'flex';
+    document.getElementById('osClienteSearch').style.display = 'none';
+    document.getElementById('osClienteResults').style.display = 'none';
+    document.getElementById('osClienteSearch').value = '';
+  }
+  function clearOsCliente(){
+    document.getElementById('osClienteId').value = '';
+    document.getElementById('osClienteChip').style.display = 'none';
+    document.getElementById('osClienteSearch').style.display = '';
+    document.getElementById('osClienteSearch').focus();
+  }
+  document.getElementById('osClienteSearch').addEventListener('input', (e)=>{
+    const q = norm(e.target.value.trim());
+    if(!q){ document.getElementById('osClienteResults').style.display = 'none'; return; }
+    const filtered = state.cache.clientes.filter(c => [c.nome,c.telefone].filter(Boolean).some(f=>norm(f).includes(q)));
+    renderOsClienteResults(filtered);
+  });
+  document.getElementById('osClienteSearch').addEventListener('focus', (e)=>{
+    const q = norm(e.target.value.trim());
+    if(q) renderOsClienteResults(state.cache.clientes.filter(c => [c.nome,c.telefone].filter(Boolean).some(f=>norm(f).includes(q))));
+  });
+  document.addEventListener('click', (e)=>{
+    const wrap = document.getElementById('osClienteResults');
+    if(!wrap) return;
+    if(!e.target.closest('#osClienteSearch') && !e.target.closest('#osClienteResults')) wrap.style.display = 'none';
+  });
+  document.getElementById('osClienteTrocar').addEventListener('click', (e)=>{ e.preventDefault(); clearOsCliente(); });
   document.getElementById('osNovoCliente').addEventListener('click', (e)=>{
     e.preventDefault();
     openClienteForm(null, async (novo)=>{
       state.cache.clientes.unshift(novo);
-      const sel = document.getElementById('osCliente');
-      if(sel){ const opt = document.createElement('option'); opt.value=novo.id; opt.textContent=novo.nome; opt.selected=true; sel.prepend(opt); }
+      selectOsCliente(novo.id);
     }, true);
   });
   wireCalculadoraPreco('osNew', 'osOrcamento');
@@ -2085,7 +2140,7 @@ function openOsForm(simplified){
         btn.textContent = 'Salvando...';
       }
       const payload = {
-        cliente_id: document.getElementById('osCliente').value || null,
+        cliente_id: document.getElementById('osClienteId').value || null,
         tecnico_id: document.getElementById('osTecnico').value || null,
         tipo_aparelho: document.getElementById('osTipo').value,
         marca: document.getElementById('osMarca').value.trim(),
