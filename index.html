@@ -404,11 +404,15 @@ function osStatusInfo(key){ return OS_STATUS.find(s=>s.key===key) || OS_STATUS[0
 
 const ORC_STATUS = [
   { key: 'aberto', label: 'Em aberto', badge: 'badge-blue' },
+  { key: 'aguardando_aprovacao', label: 'Aguardando aprovação do cliente', badge: 'badge-warning' },
+  { key: 'aguardando_peca', label: 'Aguardando peça', badge: 'badge-serious' },
   { key: 'aprovado', label: 'Aprovado', badge: 'badge-good' },
   { key: 'recusado', label: 'Recusado', badge: 'badge-critical' },
   { key: 'expirado', label: 'Expirado', badge: 'badge-muted' },
   { key: 'convertido', label: 'Convertido em venda', badge: 'badge-good' },
 ];
+const ORC_ABERTO_LIKE = ['aberto','aguardando_aprovacao','aguardando_peca'];
+const ORC_EDITAVEL_CONVERSIVEL = ['aberto','aguardando_aprovacao','aguardando_peca','aprovado'];
 function orcStatusInfo(key){ return ORC_STATUS.find(s=>s.key===key) || ORC_STATUS[0]; }
 
 const CATEGORIAS = [
@@ -1423,6 +1427,7 @@ async function renderOrcamentos(){
       <button class="btn btn-ghost btn-sm" data-orc="${o.id}">Ver</button>
       <button class="btn btn-ghost btn-sm" data-orc-edit="${o.id}">Editar</button>
       <button class="btn btn-ghost btn-sm" data-orc-del="${o.id}" style="color:var(--critical)">Excluir</button>
+      ${ORC_EDITAVEL_CONVERSIVEL.includes(o.status) ? `<button class="btn btn-ghost btn-sm" data-orc-conv="${o.id}" style="color:var(--good);">Converter</button>` : ''}
     </td>
     </tr>`;
   }).join('') : `<tr class="empty-row"><td colspan="7">Nenhum orçamento registrado ainda.</td></tr>`;
@@ -1435,7 +1440,12 @@ async function renderOrcamentos(){
     navigate('orcamentos');
   }));
 
-  function renderResults(list){
+    orcBody.querySelectorAll('[data-orc-conv]').forEach(b=> b.addEventListener('click', ()=>{
+    if(!confirm('Converter este orçamento em venda?')) return
+    converterOrcamentoEmVenda(b.dataset.orcConv, b)
+  }))
+
+function renderResults(list){
     const el = document.getElementById('orcResults');
     if(!list.length){ el.innerHTML = `<div style="padding:14px;color:var(--muted);font-size:13px;">Nenhum produto encontrado.</div>`; return; }
     el.innerHTML = list.slice(0,25).map(p=>`
@@ -1731,6 +1741,51 @@ function exportarOrcamentoPDF(o, cliente, itens, venc){
   win.document.close();
 }
 
+async function converterOrcamentoEmVenda(orcId, btnEl){
+  const { data } = await sb.from('orcamentos').select('*').eq('id', orcId).limit(1)
+  const o = (data||[])[0]
+  if(!o){ toast('Orçamento não encontrado', 'err'); return }
+  if(o.status === 'convertido'){ toast('Este orçamento já foi convertido em venda', 'err'); return }
+  const { data: itens } = await sb.from('orcamento_itens').select('*').eq('orcamento_id', orcId)
+  if(btnEl){ btnEl.disabled = true; btnEl.textContent = 'Convertendo...' }
+  try{
+    const produtosAtuais = await sbSelect('produtos')
+    for(const i of (itens||[])){
+      const p = produtosAtuais.find(x=>x.id===i.produto_id)
+      if(p && p.estoque_atual < i.quantidade){
+        toast('Estoque insuficiente para '+i.produto_nome+' (disponível: '+p.estoque_atual+')', 'err')
+        if(btnEl){ btnEl.disabled = false; btnEl.textContent = 'Converter em venda' }
+        return
+      }
+    }
+    const { data: vendaRows, error } = await sb.from('vendas').insert({
+      cliente_id: o.cliente_id, usuario_id: state.user.id, forma_pagamento: 'não informado',
+      desconto: o.desconto, total: o.total, status: 'concluida', observacoes: 'Convertida do orçamento #'+o.numero
+    }).select()
+    if(error) throw error
+    const venda = vendaRows[0]
+    await sb.from('itens_venda').insert((itens||[]).map(i=>({
+      venda_id: venda.id, produto_id: i.produto_id, produto_nome: i.produto_nome,
+      quantidade: i.quantidade, preco_unitario: i.preco_unitario, subtotal: i.subtotal
+    })))
+    for(const i of (itens||[])){
+      const p = produtosAtuais.find(x=>x.id===i.produto_id)
+      if(p) await sb.from('produtos').update({estoque_atual: Math.max(0, p.estoque_atual - i.quantidade)}).eq('id', i.produto_id)
+    }
+    await sb.from('financeiro_lancamentos').insert({
+      tipo:'entrada', categoria:'Venda', descricao:'Venda #'+venda.numero+' (orçamento #'+o.numero+')',
+      valor: o.total, forma_pagamento:'não informado', data: localDateStr(new Date()), status:'pago', venda_id: venda.id
+    })
+    await sb.from('orcamentos').update({status:'convertido'}).eq('id', orcId)
+    toast('Orçamento convertido na venda #'+venda.numero+'!', 'ok')
+    closeModal()
+    navigate('vendas')
+  }catch(err){
+    console.error(err); toast('Erro ao converter: '+err.message, 'err')
+    if(btnEl){ btnEl.disabled = false; btnEl.textContent = 'Converter em venda' }
+  }
+}
+
 async function openOrcamentoDetail(orcId){
   const { data } = await sb.from('orcamentos').select('*').eq('id', orcId).limit(1);
   const o = (data||[])[0];
@@ -1762,12 +1817,15 @@ async function openOrcamentoDetail(orcId){
       <div class="hint">Copie e envie esse resumo para o cliente por WhatsApp, ou use os botões abaixo.</div>
     </div>
     <div class="modal-footer" style="flex-wrap:wrap;">
-      ${o.status==='aberto' ? `<button class="btn btn-danger" id="orcRecusarBtn">Marcar recusado</button><button class="btn btn-secondary" id="orcAprovarBtn">Marcar aprovado</button>` : ''}
+      ${ORC_ABERTO_LIKE.includes(o.status) ? `
+      ${o.status!=='aguardando_aprovacao' ? `<button class="btn btn-secondary" data-orc-status="aguardando_aprovacao">Aguardando aprovação do cliente</button>` : ''}
+      ${o.status!=='aguardando_peca' ? `<button class="btn btn-secondary" data-orc-status="aguardando_peca">Aguardando peça</button>` : ''}
+      <button class="btn btn-danger" id="orcRecusarBtn">Marcar recusado</button><button class="btn btn-secondary" id="orcAprovarBtn">Marcar aprovado</button>` : ''}
       <button class="btn btn-secondary" id="orcCopiarBtn">Copiar resumo</button>
       <button class="btn btn-secondary" id="orcLinkBtn">Copiar link para o cliente</button>
       <button class="btn btn-secondary" id="orcExportarBtn">Exportar / Imprimir</button>
-      ${['aberto','aprovado'].includes(o.status) ? `<button class="btn btn-secondary" id="orcEditarBtn">Editar orçamento</button>` : ''}
-      ${['aberto','aprovado'].includes(o.status) ? `<button class="btn btn-primary" id="orcConverterBtn">Converter em venda</button>` : ''}
+      ${ORC_EDITAVEL_CONVERSIVEL.includes(o.status) ? `<button class="btn btn-secondary" id="orcEditarBtn">Editar orçamento</button>` : ''}
+      ${ORC_EDITAVEL_CONVERSIVEL.includes(o.status) ? `<button class="btn btn-primary" id="orcConverterBtn">Converter em venda</button>` : ''}
     </div>
   `);
 
@@ -1796,6 +1854,12 @@ async function openOrcamentoDetail(orcId){
     toast('Orçamento marcado como recusado', 'ok');
     closeModal(); navigate('orcamentos');
   });
+  
+  document.querySelectorAll('[data-orc-status]').forEach(b=> b.addEventListener('click', async ()=>{
+    await sb.from('orcamentos').update({status:b.dataset.orcStatus}).eq('id', orcId)
+    toast('Status do orçamento atualizado', 'ok')
+    closeModal(); navigate('orcamentos')
+  }))
   const editarBtn = document.getElementById('orcEditarBtn');
   if(editarBtn) editarBtn.addEventListener('click', ()=>{
     state.orcCart = (itens||[]).map(i=>({produto_id:i.produto_id, nome:i.produto_nome, preco_unitario:Number(i.preco_unitario), quantidade:i.quantidade}));
@@ -1804,53 +1868,15 @@ async function openOrcamentoDetail(orcId){
     closeModal();
     navigate('orcamentos');
   });
-  const converterBtn = document.getElementById('orcConverterBtn');
-  if(converterBtn) converterBtn.addEventListener('click', async ()=>{
-    converterBtn.disabled = true; converterBtn.textContent = 'Convertendo...';
-    try{
-      const produtosAtuais = await sbSelect('produtos');
-      for(const i of (itens||[])){
-        const p = produtosAtuais.find(x=>x.id===i.produto_id);
-        if(p && p.estoque_atual < i.quantidade){
-          toast('Estoque insuficiente para '+i.produto_nome+' (disponível: '+p.estoque_atual+')', 'err');
-          converterBtn.disabled = false; converterBtn.textContent = 'Converter em venda';
-          return;
-        }
-      }
-      const { data: vendaRows, error } = await sb.from('vendas').insert({
-        cliente_id: o.cliente_id, usuario_id: state.user.id, forma_pagamento: 'não informado',
-        desconto: o.desconto, total: o.total, status: 'concluida', observacoes: 'Convertida do orçamento #'+o.numero
-      }).select();
-      if(error) throw error;
-      const venda = vendaRows[0];
-      await sb.from('itens_venda').insert((itens||[]).map(i=>({
-        venda_id: venda.id, produto_id: i.produto_id, produto_nome: i.produto_nome,
-        quantidade: i.quantidade, preco_unitario: i.preco_unitario, subtotal: i.subtotal
-      })));
-      for(const i of (itens||[])){
-        const p = produtosAtuais.find(x=>x.id===i.produto_id);
-        if(p) await sb.from('produtos').update({estoque_atual: Math.max(0, p.estoque_atual - i.quantidade)}).eq('id', i.produto_id);
-      }
-      await sb.from('financeiro_lancamentos').insert({
-        tipo:'entrada', categoria:'Venda', descricao:'Venda #'+venda.numero+' (orçamento #'+o.numero+')',
-        valor: o.total, forma_pagamento:'não informado', data: localDateStr(new Date()), status:'pago', venda_id: venda.id
-      });
-      await sb.from('orcamentos').update({status:'convertido'}).eq('id', orcId);
-      toast('Orçamento convertido na venda #'+venda.numero+'!', 'ok');
-      closeModal();
-      navigate('vendas');
-    }catch(err){
-      console.error(err); toast('Erro ao converter: '+err.message, 'err');
-      converterBtn.disabled = false; converterBtn.textContent = 'Converter em venda';
-    }
-  });
+  const converterBtn = document.getElementById('orcConverterBtn')
+  if(converterBtn) converterBtn.addEventListener('click', ()=> converterOrcamentoEmVenda(orcId, converterBtn))
 }
 
 async function editarOrcamentoRapido(orcId){
   const { data } = await sb.from('orcamentos').select('*').eq('id', orcId).limit(1);
   const o = (data||[])[0];
   if(!o){ toast('Orçamento não encontrado', 'err'); return; }
-  if(!['aberto','aprovado'].includes(o.status)){ toast('Este orçamento não pode mais ser editado', 'err'); return; }
+  if(!ORC_EDITAVEL_CONVERSIVEL.includes(o.status)){ toast('Este orçamento não pode mais ser editado', 'err'); return; }
   const { data: itens } = await sb.from('orcamento_itens').select('*').eq('orcamento_id', orcId);
   state.orcCart = (itens||[]).map(i=>({produto_id:i.produto_id, nome:i.produto_nome, preco_unitario:Number(i.preco_unitario), quantidade:i.quantidade}));
   state.orcEditId = orcId;
