@@ -797,7 +797,10 @@ async function renderDashboard(){
   const saidasMes = financeiro.filter(f => f.tipo==='saida' && (f.data||'').slice(0,7)===monthStr)
     .reduce((s,f)=> s + Number(f.valor||0), 0);
 
-  const produtosPorId = {};
+    const vendasMesCategoria = financeiro.filter(f => f.tipo==='entrada' && f.categoria==='Venda' && (f.data||'').slice(0,7)===monthStr)
+    .reduce((s,f)=> s + Number(f.valor||0), 0)
+
+const produtosPorId = {};
   produtos.forEach(p=>{ produtosPorId[p.id] = p; });
   const vendasMes = vendas.filter(v => v.status !== 'cancelada' && v.created_at && localDateStr(v.created_at).slice(0,7) === monthStr);
   const vendaIdsMes = new Set(vendasMes.map(v=>v.id));
@@ -857,7 +860,7 @@ async function renderDashboard(){
       </div>
       <div class="card stat-tile">
         <div class="stat-label">Valor de Venda (mês) <span class="stat-icon" style="background:#e7f8e7;color:var(--good);">&#128200;</span></div>
-        <div class="stat-value">${fmtMoney(faturamentoMes)}</div>
+        <div class="stat-value">${fmtMoney(vendasMesCategoria)}</div>
         <div class="stat-delta">Saídas no mês: ${fmtMoney(saidasMes)}</div>
       </div>
       <div class="card stat-tile" style="grid-column:1/-1;background:linear-gradient(135deg,#eaf6ec,#f4fbf5);border-color:#cfe9d2;">
@@ -1692,7 +1695,7 @@ function exportarOrcamentoPDF(o, cliente, itens, venc){
       <td style="text-align:right;">${fmtMoney(i.subtotal)}</td>
     </tr>`).join('');
   const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<title>Orçamento #${o.numero} - UpTECH</title>
+<title>Orçamento #${o.numero} - ${escapeHtml(cliente?.nome || 'Não identificado')} - UpTECH</title>
 <style>
   *{box-sizing:border-box;}
   body{font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color:#0b0b0b; padding:40px; max-width:760px; margin:0 auto;}
