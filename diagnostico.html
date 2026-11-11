@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#2a78d6">
+<title>Diagnóstico do aparelho — UpTECH</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --brand:#2a78d6; --brand-dark:#184f95; --brand-bg:#eef4fc;
+    --text:#0b0b0b; --text2:#52514e; --muted:#898781;
+    --line:#e1e0d9; --surface:#fcfcfb; --page:#f4f5f4;
+    --good:#0ca30c; --warning:#fab219; --critical:#d03b3b;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;}
+  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--page); color:var(--text);}
+  .wrap{max-width:560px; margin:0 auto; padding:16px 16px 60px;}
+  .header{display:flex; align-items:center; padding:8px 0 14px;}
+  .mark{width:38px; height:38px; border-radius:10px; background:var(--brand); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; margin-right:10px; flex-shrink:0;}
+  .header h1{font-size:17px; margin:0;}
+  .header small{color:var(--muted); display:block; font-size:12px; margin-top:2px;}
+  .sync{margin-left:auto; font-size:11.5px; font-weight:700; padding:4px 9px; border-radius:100px; background:#eeeeec; color:var(--text2); white-space:nowrap;}
+  .sync.on{background:#e7f8e7; color:#0a6b0a;}
+  .sync.err{background:#fceaea; color:#96201f;}
+  .card{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px;}
+  .btn{display:block; width:100%; border:0; border-radius:12px; padding:14px 16px; font-size:16px; font-weight:700; cursor:pointer; margin-top:10px; font-family:inherit;}
+  .btn.primary{background:var(--brand); color:#fff;}
+  .btn.good{background:#e7f8e7; color:#0a6b0a;}
+  .btn.bad{background:#fceaea; color:#96201f;}
+  .btn.ghost{background:transparent; color:var(--text2); font-weight:600;}
+  .btn.alt{background:var(--brand-bg); color:var(--brand-dark);}
+  .btn:disabled{opacity:.5;}
+  .progress{height:6px; background:var(--line); border-radius:6px; overflow:hidden; margin:2px 0 14px;}
+  .progress i{display:block; height:100%; background:var(--brand); width:0; transition:width .3s;}
+  .step{font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; font-weight:700;}
+  h2{margin:4px 0 8px; font-size:21px;}
+  p{line-height:1.5; color:var(--text2); margin:8px 0;}
+  .q{font-weight:700; font-size:16px; margin:16px 0 2px; color:var(--text);}
+  dl.info{display:grid; grid-template-columns:auto 1fr; grid-column-gap:14px; grid-row-gap:7px; margin:0; font-size:14px;}
+  dl.info dt{color:var(--muted);}
+  dl.info dd{margin:0; text-align:right; font-weight:600; word-break:break-word;}
+  .badge{display:inline-block; font-size:11.5px; font-weight:800; padding:3px 9px; border-radius:100px; white-space:nowrap;}
+  .b-ok{background:#e7f8e7; color:#0a6b0a;}
+  .b-falha{background:#fceaea; color:#96201f;}
+  .b-atencao{background:#fff5e0; color:#8a5c00;}
+  .b-pulado,.b-nao_suportado{background:#eeeeec; color:var(--text2);}
+  .res{display:flex; justify-content:space-between; align-items:flex-start; padding:10px 0; border-bottom:1px solid var(--line);}
+  .res:last-child{border:0;}
+  .res .l{padding-right:10px; font-weight:600; font-size:14.5px;}
+  .res small{display:block; color:var(--muted); font-size:12.5px; margin-top:2px; font-weight:400;}
+  .sum{display:flex; flex-wrap:wrap; margin:6px -4px 4px;}
+  .sum .badge{margin:4px; font-size:13px; padding:5px 11px;}
+  textarea{width:100%; border:1px solid var(--line); border-radius:10px; padding:10px; font-size:15px; font-family:inherit; min-height:80px; background:#fff;}
+  .fs{position:fixed; top:0; left:0; right:0; bottom:0; z-index:50; touch-action:none; overscroll-behavior:none; -webkit-user-select:none; user-select:none;}
+  .fs-hint{position:absolute; left:50%; bottom:calc(28px + env(safe-area-inset-bottom)); transform:translateX(-50%); background:rgba(0,0,0,.65); color:#fff; padding:8px 14px; border-radius:20px; font-size:14px; white-space:nowrap; transition:opacity .6s;}
+  .touchgrid{display:grid; background:#fff;}
+  .touchgrid .cell{border:1px solid #c9d1db; background:#fff;}
+  .touchgrid .cell.on{background:#3ecf5e;}
+  .fs-pill{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); background:#d03b3b; color:#fff; border:0; border-radius:30px; padding:14px 20px; font-size:15px; font-weight:700;}
+  .big{font-size:56px; font-weight:800; text-align:center; margin:6px 0; color:var(--brand-dark);}
+  .pad{border:2px dashed var(--brand); background:var(--brand-bg); border-radius:14px; height:34vh; min-height:180px; display:flex; align-items:center; justify-content:center; color:var(--brand-dark); font-weight:700; touch-action:none; -webkit-user-select:none; user-select:none; text-align:center; padding:10px;}
+  .meter{height:18px; background:var(--line); border-radius:10px; overflow:hidden; margin:14px 0 6px;}
+  .meter i{display:block; height:100%; width:0; background:var(--good); transition:width .08s;}
+  video.preview{width:100%; border-radius:12px; background:#000; max-height:50vh; margin-top:6px;}
+  .live{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:13px; background:#fff; border:1px solid var(--line); border-radius:10px; padding:10px; margin:10px 0; line-height:1.7; color:var(--text2);}
+  .mrow{display:flex; align-items:center; justify-content:space-between; padding:9px 0; border-bottom:1px solid var(--line);}
+  .mrow:last-of-type{border:0;}
+  .mrow .t{font-size:14px; font-weight:600; padding-right:8px;}
+  .seg{display:flex; flex-shrink:0;}
+  .seg button{border:1px solid var(--line); background:#fff; padding:8px 11px; font-size:14px; font-weight:700; cursor:pointer; font-family:inherit; color:var(--text2);}
+  .seg button:first-child{border-radius:9px 0 0 9px;}
+  .seg button:last-child{border-radius:0 9px 9px 0;}
+  .seg button.on-ok{background:#e7f8e7; color:#0a6b0a; border-color:#9ad89a;}
+  .seg button.on-falha{background:#fceaea; color:#96201f; border-color:#eba3a3;}
+  .seg button.on-na{background:#eeeeec; color:var(--text);}
+  .spinner{width:34px; height:34px; border:4px solid var(--line); border-top-color:var(--brand); border-radius:50%; animation:spin .9s linear infinite; margin:18px auto;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .center{text-align:center;}
+  .notice{background:#fff5e0; color:#8a5c00; border-radius:10px; padding:10px 12px; font-size:13.5px; margin-bottom:12px; line-height:1.45;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div class="mark">UP</div>
+    <div><h1>Diagnóstico do aparelho</h1><small>UpTECH Soluções Tecnológicas</small></div>
+    <span class="sync" id="sync">modo avulso</span>
+  </div>
+  <div class="progress" id="progWrap" style="display:none;"><i id="prog"></i></div>
+  <div id="stage"><div class="card center"><div class="spinner"></div>Carregando...</div></div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://wcchaejzblaerhndkkym.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_uk8FFRvd9A-8jZ_Pf80lfg_z8372CXq";
+const sb = (typeof window.supabase !== 'undefined') ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
+const SESSION = new URLSearchParams(location.search).get('s');
+const state = { info: {}, resultados: [], notas: '', row: null, enviado: false };
+const cleanups = [];
+
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function stage(html){ $('stage').innerHTML = html; window.scrollTo(0, 0); }
+function wait(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+function onCleanup(fn){ cleanups.push(fn); }
+function cleanup(){ while(cleanups.length){ try{ cleanups.pop()(); }catch(e){} } }
+function stopStream(s){ if(s){ try{ s.getTracks().forEach(function(t){ t.stop(); }); }catch(e){} } }
+function setSync(ok, msg){
+  var el = $('sync');
+  if(!SESSION){ el.className = 'sync'; el.textContent = 'modo avulso'; return; }
+  el.className = 'sync ' + (ok ? 'on' : 'err');
+  el.textContent = msg || (ok ? 'conectado ao sistema' : 'sem envio');
+}
+function setProgress(i, total){
+  $('progWrap').style.display = 'block';
+  $('prog').style.width = Math.round((i / total) * 100) + '%';
+}
+
+/* ---------- Envio dos resultados ---------- */
+function contar(){
+  var c = { ok:0, falha:0, atencao:0, pulado:0, nao_suportado:0 };
+  state.resultados.forEach(function(r){ c[r.status] = (c[r.status] || 0) + 1; });
+  return c;
+}
+function gerarResumo(){
+  var c = contar(), total = state.resultados.length;
+  var partes = [total + ' verificações', c.ok + ' ok'];
+  if(c.falha) partes.push(c.falha + ' com defeito');
+  if(c.atencao) partes.push(c.atencao + ' em atenção');
+  var naoTestados = (c.pulado || 0) + (c.nao_suportado || 0);
+  if(naoTestados) partes.push(naoTestados + ' não testadas');
+  var txt = partes.join(' · ');
+  var defeitos = state.resultados.filter(function(r){ return r.status === 'falha'; }).map(function(r){ return r.label; });
+  if(defeitos.length) txt += '\nCom defeito: ' + defeitos.join(', ') + '.';
+  var atencao = state.resultados.filter(function(r){ return r.status === 'atencao'; }).map(function(r){ return r.label; });
+  if(atencao.length) txt += '\nAtenção: ' + atencao.join(', ') + '.';
+  return txt;
+}
+async function salvar(status){
+  if(!sb || !SESSION) return false;
+  try{
+    var dados = Object.assign({}, state.info, { observacoes: state.notas || '' });
+    var res = await sb.from('diagnosticos').update({
+      dados: dados,
+      testes: state.resultados,
+      status: status,
+      resumo: gerarResumo(),
+      plataforma: state.info.plataforma || null,
+      updated_at: new Date().toISOString()
+    }).eq('id', SESSION);
+    var ok = !res.error;
+    setSync(ok);
+    return ok;
+  }catch(e){ setSync(false); return false; }
+}
+function registrar(key, label, status, detalhe){
+  var item = { key: key, label: label, status: status, detalhe: detalhe || '' };
+  var idx = -1;
+  state.resultados.forEach(function(r, i){ if(r.key === key) idx = i; });
+  if(idx >= 0) state.resultados[idx] = item; else state.resultados.push(item);
+}
+
+/* ---------- Informações do aparelho ---------- */
+var IPHONE_TELAS = {
+  '320x568':'iPhone SE (1ª ger.) / 5s', '375x667':'iPhone 6 / 7 / 8 / SE (2ª e 3ª ger.)', '414x736':'iPhone 6 Plus / 7 Plus / 8 Plus',
+  '375x812':'iPhone X / XS / 11 Pro / 12 mini / 13 mini', '414x896':'iPhone XR / XS Max / 11 / 11 Pro Max',
+  '390x844':'iPhone 12 / 12 Pro / 13 / 13 Pro / 14', '428x926':'iPhone 12 Pro Max / 13 Pro Max / 14 Plus',
+  '393x852':'iPhone 14 Pro / 15 / 15 Pro / 16', '430x932':'iPhone 14 Pro Max / 15 Plus / 15 Pro Max / 16 Plus',
+  '402x874':'iPhone 16 Pro / 17 / 17 Pro', '440x956':'iPhone 16 Pro Max / 17 Pro Max'
+};
+function medirHz(){
+  return new Promise(function(res){
+    var n = 0, t0 = null, feito = false;
+    function fim(v){ if(!feito){ feito = true; res(v); } }
+    function f(t){
+      if(t0 === null) t0 = t;
+      n++;
+      if(t - t0 >= 700){ var hz = (n - 1) * 1000 / (t - t0); fim(Math.round(hz / 5) * 5); }
+      else requestAnimationFrame(f);
+    }
+    requestAnimationFrame(f);
+    setTimeout(function(){ fim(null); }, 3000);
+  });
+}
+async function coletarInfo(){
+  var ua = navigator.userAgent || '';
+  var info = {};
+  var isAndroid = /Android/i.test(ua);
+  var isIPad = /iPad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  var isIPhone = /iPhone|iPod/i.test(ua);
+  info.plataforma = isAndroid ? 'android' : ((isIPad || isIPhone) ? 'ios' : 'outro');
+  info.tipo = isIPad ? 'tablet' : (isIPhone ? 'celular' : (isAndroid ? (/Mobile/i.test(ua) ? 'celular' : 'tablet') : 'desconhecido'));
+
+  var campos = [];
+  function add(k, v){ if(v !== null && v !== undefined && v !== '') campos.push({ k: k, v: String(v) }); }
+
+  // Modelo e versão do sistema
+  var modelo = null, versao = null;
+  try{
+    if(navigator.userAgentData && navigator.userAgentData.getHighEntropyValues){
+      var he = await navigator.userAgentData.getHighEntropyValues(['model','platformVersion']);
+      if(he.model) modelo = he.model;
+      if(he.platformVersion) versao = he.platformVersion;
+    }
+  }catch(e){}
+  if(isAndroid){
+    if(!modelo || modelo === 'K'){
+      var m = ua.match(/Android [\d.]+; ([^;)]+?)(?: Build|\))/);
+      if(m) modelo = m[1].trim();
+    }
+    if(!versao){ var v = ua.match(/Android ([\d.]+)/); if(v) versao = v[1]; }
+    info.sistema = 'Android ' + (versao || '?').split('.').slice(0, 2).join('.');
+  }else if(isIPad || isIPhone){
+    var o = ua.match(/OS (\d+)[_.](\d+)(?:[_.](\d+))?/);
+    info.sistema = o ? ('iOS ' + o[1] + '.' + o[2] + (o[3] ? '.' + o[3] : '')) : (isIPad ? 'iPadOS' : 'iOS');
+  }else{
+    info.sistema = navigator.platform || 'Desconhecido';
+  }
+  var w = Math.min(screen.width, screen.height), h = Math.max(screen.width, screen.height);
+  if(isIPhone){
+    modelo = IPHONE_TELAS[w + 'x' + h] || ('iPhone (tela ' + w + '×' + h + ')');
+    info.modelo_aproximado = true;
+  }else if(isIPad){
+    modelo = 'iPad (tela ' + w + '×' + h + ')';
+    info.modelo_aproximado = true;
+  }
+  info.modelo = modelo || '';
+  add('Modelo', modelo ? (info.modelo_aproximado ? 'Possíveis: ' + modelo : modelo) : 'Não identificado');
+  add('Sistema', info.sistema);
+  add('Tipo', info.tipo === 'celular' ? 'Celular' : (info.tipo === 'tablet' ? 'Tablet' : 'Desconhecido'));
+
+  // Tela
+  var dpr = window.devicePixelRatio || 1;
+  info.tela = w + 'x' + h;
+  add('Tela (px CSS)', w + ' × ' + h + ' (densidade ' + (Math.round(dpr * 10) / 10) + 'x)');
+  add('Resolução real', Math.round(w * dpr) + ' × ' + Math.round(h * dpr));
+  try{ var hz = await medirHz(); if(hz){ info.hz = hz; add('Taxa de atualização', '≈ ' + hz + ' Hz'); } }catch(e){}
+  add('Pontos de toque', navigator.maxTouchPoints);
+
+  // Hardware
+  if(navigator.hardwareConcurrency) add('Núcleos do processador', navigator.hardwareConcurrency);
+  if(navigator.deviceMemory) add('Memória RAM (aprox.)', navigator.deviceMemory + ' GB' + (navigator.deviceMemory >= 8 ? ' ou mais' : ''));
+  try{
+    var c = document.createElement('canvas');
+    var gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+    if(gl){
+      var ext = gl.getExtension('WEBGL_debug_renderer_info');
+      var gpu = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+      if(gpu){ info.gpu = gpu; add('GPU', gpu); }
+    }
+  }catch(e){}
+
+  // Bateria / rede
+  try{
+    if(navigator.getBattery){
+      var b = await navigator.getBattery();
+      info.bateria_nivel = Math.round(b.level * 100);
+      info.bateria_carregando = !!b.charging;
+      add('Bateria agora', info.bateria_nivel + '%' + (b.charging ? ' (carregando)' : ''));
+    }
+  }catch(e){}
+  var con = navigator.connection;
+  if(con){
+    var partesRede = [];
+    if(con.type) partesRede.push(con.type);
+    if(con.effectiveType) partesRede.push(con.effectiveType);
+    if(con.downlink) partesRede.push(con.downlink + ' Mbps');
+    if(partesRede.length) add('Rede', partesRede.join(' · '));
+  }
+  add('Idioma', navigator.language);
+
+  // Navegador
+  var nav = 'Navegador';
+  if(/CriOS|Chrome\//.test(ua) && !/EdgA|Edg\//.test(ua) && !/SamsungBrowser/.test(ua)) nav = 'Chrome';
+  if(/SamsungBrowser/.test(ua)) nav = 'Samsung Internet';
+  if(/EdgA|Edg\//.test(ua)) nav = 'Edge';
+  if(/FxiOS|Firefox/.test(ua)) nav = 'Firefox';
+  if(/Safari/.test(ua) && !/Chrome|CriOS|FxiOS|EdgA|SamsungBrowser/.test(ua)) nav = 'Safari';
+  add('Navegador', nav);
+
+  info.campos = campos;
+  info.coletado_em = new Date().toISOString();
+  return info;
+}
+
+/* ---------- Auxiliares de tela ---------- */
+var TESTES = [];
+function head(t){
+  return '<div class="step">Verificação ' + t.n + ' de ' + TESTES.length + '</div><h2>' + t.icon + ' ' + esc(t.label) + '</h2>';
+}
+function choose(){
+  return new Promise(function(res){
+    var st = $('stage');
+    var h = function(e){
+      var b = e.target.closest ? e.target.closest('[data-k]') : null;
+      if(b){ st.removeEventListener('click', h); res(b.getAttribute('data-k')); }
+    };
+    st.addEventListener('click', h);
+  });
+}
+async function intro(t, texto, label){
+  stage('<div class="card">' + head(t) + '<p>' + texto + '</p>' +
+    '<button class="btn primary" data-k="go">' + (label || 'Iniciar teste') + '</button>' +
+    '<button class="btn ghost" data-k="skip">Pular esta verificação</button></div>');
+  return await choose();
+}
+// Acrescenta uma pergunta com botões; resolve 'ok' | 'falha' | 'pular'
+function askBtns(pergunta, o){
+  o = o || {};
+  return new Promise(function(res){
+    var bar = document.createElement('div');
+    bar.innerHTML = '<div class="q">' + pergunta + '</div>' +
+      '<button class="btn good" data-r="ok">✓ ' + (o.okLabel || 'Funciona') + '</button>' +
+      '<button class="btn bad" data-r="falha">✕ ' + (o.badLabel || 'Não funciona') + '</button>' +
+      '<button class="btn ghost" data-r="pular">Pular</button>';
+    var alvo = $('stage').firstElementChild || $('stage');
+    alvo.appendChild(bar);
+    bar.addEventListener('click', function(e){
+      var b = e.target.closest('[data-r]');
+      if(b){ bar.parentNode && bar.parentNode.removeChild(bar); res(b.getAttribute('data-r')); }
+    });
+  });
+}
+function pulado(txt){ return { status: 'pulado', detalhe: txt || 'Pulado pelo técnico' }; }
+function mapear(r, okTxt, badTxt, manual){
+  var suf = manual ? ' (verificado manualmente)' : '';
+  if(r === 'ok') return { status: 'ok', detalhe: okTxt + suf };
+  if(r === 'falha') return { status: 'falha', detalhe: badTxt + suf };
+  return pulado();
+}
+function erroMidia(e, nome){
+  var n = e && e.name;
+  if(n === 'NotAllowedError' || n === 'SecurityError' || n === 'PermissionDeniedError') return { status: 'pulado', detalhe: 'Permissão de ' + nome + ' negada no navegador' };
+  if(n === 'NotFoundError' || n === 'DevicesNotFoundError') return { status: 'falha', detalhe: nome.charAt(0).toUpperCase() + nome.slice(1) + ' não encontrado(a) pelo sistema' };
+  if(n === 'NotReadableError' || n === 'TrackStartError') return { status: 'falha', detalhe: 'Não foi possível acessar o(a) ' + nome + ' (em uso por outro app ou com defeito)' };
+  return { status: 'pulado', detalhe: 'Não foi possível testar o(a) ' + nome + (e && e.message ? ': ' + e.message : '') };
+}
+function temMidia(){ return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
+
+/* ---------- Testes ---------- */
+async function tCores(t){
+  var k = await intro(t, 'Vamos mostrar cores sólidas em <b>tela cheia</b>. Toque na tela para trocar de cor e procure <b>manchas, pontos mortos, linhas, áreas amareladas ou imagem queimada</b>. Deixe o brilho no máximo.');
+  if(k === 'skip') return pulado();
+  var cores = [['#ff0000','Vermelho'],['#00ff00','Verde'],['#0000ff','Azul'],['#ffffff','Branco'],['#000000','Preto']];
+  var ov = document.createElement('div');
+  ov.className = 'fs';
+  document.body.appendChild(ov);
+  onCleanup(function(){ if(ov.parentNode) ov.parentNode.removeChild(ov); });
+  for(var i = 0; i < cores.length; i++){
+    ov.style.background = cores[i][0];
+    ov.innerHTML = '<span class="fs-hint">' + cores[i][1] + ' · toque para continuar (' + (i + 1) + '/' + cores.length + ')</span>';
+    (function(hint){ setTimeout(function(){ hint.style.opacity = '0'; }, 1800); })(ov.firstChild);
+    await new Promise(function(r){ ov.addEventListener('click', r, { once: true }); });
+  }
+  ov.parentNode && ov.parentNode.removeChild(ov);
+  stage('<div class="card">' + head(t) + '</div>');
+  var r = await askBtns('A tela apresentou manchas, pontos mortos, linhas, áreas amareladas ou imagem queimada?', { okLabel: 'Tela perfeita', badLabel: 'Tem defeito' });
+  return mapear(r, 'Cores uniformes, sem defeitos visíveis', 'Defeito visual na tela (manchas, pixels mortos, linhas ou queimado)');
+}
+
+async function tToque(t){
+  var k = await intro(t, 'Vai aparecer uma grade de quadrados brancos. <b>Passe o dedo por toda a tela</b>, inclusive nas bordas e cantos, até todos ficarem verdes.');
+  if(k === 'skip') return pulado();
+  var ov = document.createElement('div');
+  ov.className = 'fs touchgrid';
+  var cols = 6;
+  var rows = Math.max(8, Math.round(cols * window.innerHeight / window.innerWidth));
+  ov.style.gridTemplateColumns = 'repeat(' + cols + ',1fr)';
+  ov.style.gridTemplateRows = 'repeat(' + rows + ',1fr)';
+  var h = '';
+  for(var i = 0; i < cols * rows; i++) h += '<div class="cell"></div>';
+  ov.innerHTML = h;
+  document.body.appendChild(ov);
+  onCleanup(function(){ if(ov.parentNode) ov.parentNode.removeChild(ov); });
+  var cells = [].slice.call(ov.children);
+  var done = 0, lastTs = Date.now(), pill = null;
+  function mark(x, y){
+    var el = document.elementFromPoint(x, y);
+    if(el && el.classList && el.classList.contains('cell') && !el.classList.contains('on')){ el.classList.add('on'); done++; lastTs = Date.now(); }
+  }
+  ov.addEventListener('pointerdown', function(e){ mark(e.clientX, e.clientY); });
+  ov.addEventListener('pointermove', function(e){ mark(e.clientX, e.clientY); });
+  function toqueFallback(e){ e.preventDefault(); for(var j = 0; j < e.touches.length; j++) mark(e.touches[j].clientX, e.touches[j].clientY); }
+  ov.addEventListener('touchstart', toqueFallback, { passive: false });
+  ov.addEventListener('touchmove', toqueFallback, { passive: false });
+  var fim = await new Promise(function(res){
+    var timer = setInterval(function(){
+      if(done >= cells.length){ clearInterval(timer); res('all'); return; }
+      if(!pill && Date.now() - lastTs > 8000){
+        pill = document.createElement('button');
+        pill.className = 'fs-pill';
+        pill.textContent = 'Algumas áreas não respondem';
+        pill.addEventListener('click', function(){ clearInterval(timer); res('fail'); });
+        ov.appendChild(pill);
+      }
+    }, 250);
+    onCleanup(function(){ clearInterval(timer); });
+  });
+  var faltam = cells.length - done;
+  var regioes = {};
+  cells.forEach(function(c, idx){
+    if(!c.classList.contains('on')){
+      var r = Math.floor(idx / cols), cc = idx % cols;
+      var v = r < rows / 3 ? 'topo' : (r < 2 * rows / 3 ? 'meio' : 'base');
+      var hh = cc < 2 ? 'esquerda' : (cc < 4 ? 'centro' : 'direita');
+      regioes[v + '-' + hh] = 1;
+    }
+  });
+  ov.parentNode && ov.parentNode.removeChild(ov);
+  if(fim === 'all') return { status: 'ok', detalhe: 'Toda a tela respondeu ao toque' };
+  return { status: 'falha', detalhe: faltam + ' de ' + cells.length + ' áreas sem resposta (' + Object.keys(regioes).join(', ') + ')' };
+}
+
+async function tMulti(t){
+  var k = await intro(t, 'Encoste <b>vários dedos ao mesmo tempo</b> na área tracejada (tente chegar a 5). O contador mostra quantos toques o aparelho reconhece.');
+  if(k === 'skip') return pulado();
+  stage('<div class="card">' + head(t) + '<div class="big" id="mtN">0</div>' +
+    '<p class="center">toques simultâneos · máximo detectado: <b id="mtMax">0</b></p>' +
+    '<div class="pad" id="mtPad">Toque aqui com vários dedos</div>' +
+    '<button class="btn primary" data-k="done">Concluir</button>' +
+    '<button class="btn bad" data-k="falha">Alguns toques não aparecem</button></div>');
+  var pad = $('mtPad'), max = 0, ativos = {};
+  function atualizar(n){
+    if(n > max) max = n;
+    $('mtN').textContent = n;
+    $('mtMax').textContent = max;
+  }
+  if(window.PointerEvent){
+    pad.addEventListener('pointerdown', function(e){ ativos[e.pointerId] = 1; atualizar(Object.keys(ativos).length); });
+    var solta = function(e){ delete ativos[e.pointerId]; atualizar(Object.keys(ativos).length); };
+    pad.addEventListener('pointerup', solta);
+    pad.addEventListener('pointercancel', solta);
+    pad.addEventListener('pointerleave', solta);
+  }else{
+    var tch = function(e){ e.preventDefault(); atualizar(e.touches.length); };
+    pad.addEventListener('touchstart', tch, { passive: false });
+    pad.addEventListener('touchmove', tch, { passive: false });
+    pad.addEventListener('touchend', tch, { passive: false });
+  }
+  var r = await choose();
+  if(r === 'falha') return { status: 'falha', detalhe: 'Detectou no máximo ' + max + ' toque(s) simultâneo(s)' };
+  if(max >= 2) return { status: 'ok', detalhe: 'Detectou até ' + max + ' toques simultâneos' };
+  return { status: 'atencao', detalhe: 'Apenas ' + max + ' toque detectado (teste inconclusivo)' };
+}
+
+async function tAudio(t){
+  var k = await intro(t, 'Aumente o volume e <b>desative o modo silencioso</b> (no iPhone, a chave lateral). Toque nos botões e escute com atenção: o som deve sair claro, sem chiado, estalos ou distorção.');
+  if(k === 'skip') return pulado();
+  var AC = window.AudioContext || window.webkitAudioContext;
+  if(!AC){
+    stage('<div class="card">' + head(t) + '<p>Este navegador não consegue gerar som de teste. Reproduza uma música ou vídeo no aparelho.</p></div>');
+    return mapear(await askBtns('O som saiu normalmente?'), 'Som normal', 'Som com defeito', true);
+  }
+  var ac = new AC();
+  onCleanup(function(){ try{ ac.close(); }catch(e){} });
+  stage('<div class="card">' + head(t) + '<button class="btn primary" data-s="0">▶ Tocar som</button>' +
+    '<button class="btn alt" data-s="-1">◀ Só lado esquerdo</button><button class="btn alt" data-s="1">Só lado direito ▶</button></div>');
+  var tocou = false;
+  $('stage').addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('[data-s]') : null;
+    if(!b) return;
+    tocou = true;
+    try{
+      if(ac.state === 'suspended') ac.resume();
+      var o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(440, ac.currentTime);
+      o.frequency.setValueAtTime(880, ac.currentTime + 0.6);
+      o.frequency.setValueAtTime(1760, ac.currentTime + 1.2);
+      g.gain.value = 0.25;
+      if(ac.createStereoPanner){
+        var p = ac.createStereoPanner();
+        p.pan.value = parseFloat(b.getAttribute('data-s'));
+        o.connect(p); p.connect(g);
+      }else{ o.connect(g); }
+      g.connect(ac.destination);
+      o.start();
+      o.stop(ac.currentTime + 1.8);
+    }catch(err){}
+  });
+  var r = await askBtns('O som saiu <b>claro</b>, sem chiado, estalos ou distorção?', { okLabel: 'Som perfeito', badLabel: 'Sem som, baixo ou com chiado' });
+  return mapear(r, 'Som claro' + (tocou ? '' : ''), 'Sem som, muito baixo ou distorcido');
+}
+
+async function tMic(t){
+  if(!temMidia()) return { status: 'nao_suportado', detalhe: 'Navegador sem acesso ao microfone (abra em Chrome ou Safari)' };
+  var k = await intro(t, 'O navegador vai pedir permissão para usar o microfone. Depois, <b>fale, bata palmas ou assopre</b> perto da parte de baixo do aparelho: a barra deve se mexer.');
+  if(k === 'skip') return pulado();
+  var stream;
+  try{ stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }catch(e){ return erroMidia(e, 'microfone'); }
+  onCleanup(function(){ stopStream(stream); });
+  var AC = window.AudioContext || window.webkitAudioContext;
+  var ac = new AC();
+  onCleanup(function(){ try{ ac.close(); }catch(e){} });
+  if(ac.state === 'suspended') ac.resume();
+  var an = ac.createAnalyser();
+  an.fftSize = 1024;
+  ac.createMediaStreamSource(stream).connect(an);
+  stage('<div class="card">' + head(t) + '<p>Fale ou bata palmas perto do microfone.</p><div class="meter"><i id="mtr"></i></div>' +
+    '<p class="center" id="mtMsg">Aguardando som...</p>' +
+    '<button class="btn bad" data-k="falha">A barra não se mexe</button><button class="btn ghost" data-k="skip">Pular</button></div>');
+  var buf = new Uint8Array(an.fftSize), raf = null, hits = 0, parar = false;
+  onCleanup(function(){ parar = true; if(raf) cancelAnimationFrame(raf); });
+  var auto = new Promise(function(res){
+    (function loop(){
+      if(parar) return;
+      an.getByteTimeDomainData(buf);
+      var max = 0;
+      for(var i = 0; i < buf.length; i++){ var v = Math.abs(buf[i] - 128) / 128; if(v > max) max = v; }
+      var bar = $('mtr');
+      if(bar) bar.style.width = Math.min(100, Math.round(max * 250)) + '%';
+      if(max > 0.08) hits++;
+      if(hits > 8){ var m = $('mtMsg'); if(m) m.textContent = 'Som captado ✓'; setTimeout(function(){ res('auto'); }, 500); return; }
+      raf = requestAnimationFrame(loop);
+    })();
+  });
+  var r = await Promise.race([auto, choose()]);
+  if(r === 'auto') return { status: 'ok', detalhe: 'Microfone captou o som normalmente' };
+  if(r === 'falha') return { status: 'falha', detalhe: 'Microfone não captou som' };
+  return pulado();
+}
+
+async function tCamera(t, facing, nome){
+  if(!temMidia()) return { status: 'nao_suportado', detalhe: 'Navegador sem acesso à câmera (abra em Chrome ou Safari)' };
+  var k = await intro(t, 'O navegador vai pedir permissão para usar a câmera ' + nome + '. Veja se a imagem aparece <b>nítida, sem manchas, riscos ou falhas de foco</b>.');
+  if(k === 'skip') return pulado();
+  var stream;
+  try{ stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing } }, audio: false }); }catch(e){ return erroMidia(e, 'câmera ' + nome); }
+  onCleanup(function(){ stopStream(stream); });
+  stage('<div class="card">' + head(t) + '<video id="cv" class="preview" autoplay playsinline muted></video><p id="cinfo" style="font-size:12.5px"></p></div>');
+  var v = $('cv');
+  v.srcObject = stream;
+  try{ await v.play(); }catch(e){}
+  var tr = stream.getVideoTracks()[0], s = {};
+  try{ s = tr.getSettings ? tr.getSettings() : {}; }catch(e){}
+  var det = (s.width && s.height) ? (s.width + '×' + s.height) : '';
+  var fm = s.facingMode ? (s.facingMode === 'user' ? 'frontal' : 'traseira') : '';
+  $('cinfo').textContent = [fm ? 'Câmera ' + fm : '', det].filter(Boolean).join(' · ') + (facing === 'environment' && fm === 'frontal' ? ' — o aparelho não ofereceu câmera traseira' : '');
+  var r = await askBtns('A imagem está nítida, sem manchas, riscos ou falhas de foco?', { okLabel: 'Imagem boa', badLabel: 'Com defeito' });
+  var base = 'Imagem nítida' + (det ? ' (' + det + ')' : '');
+  return mapear(r, base, 'Imagem com defeito (borrada, manchada ou falhando)');
+}
+
+async function tLanterna(t){
+  var k = await intro(t, 'Vamos tentar acender a lanterna do aparelho (parte de trás).');
+  if(k === 'skip') return pulado();
+  if(temMidia()){
+    var stream = null;
+    try{
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      onCleanup(function(){ stopStream(stream); });
+      var tr = stream.getVideoTracks()[0];
+      var caps = tr.getCapabilities ? tr.getCapabilities() : {};
+      if(caps.torch){
+        await tr.applyConstraints({ advanced: [{ torch: true }] });
+        stage('<div class="card">' + head(t) + '<p>A lanterna deve estar acesa agora.</p></div>');
+        var r = await askBtns('A lanterna acendeu?', { okLabel: 'Acendeu', badLabel: 'Não acendeu' });
+        try{ await tr.applyConstraints({ advanced: [{ torch: false }] }); }catch(e){}
+        return mapear(r, 'Lanterna acendeu', 'Lanterna não acendeu');
+      }
+    }catch(e){}
+    stopStream(stream);
+  }
+  stage('<div class="card">' + head(t) + '<p>Este navegador não consegue acionar a lanterna sozinho. <b>Acenda-a pelo painel/central de controle</b> do aparelho.</p></div>');
+  var r2 = await askBtns('A lanterna acendeu normalmente?', { okLabel: 'Acendeu', badLabel: 'Não acendeu' });
+  return mapear(r2, 'Lanterna acendeu', 'Lanterna não acendeu', true);
+}
+
+async function tVibra(t){
+  var k = await intro(t, 'Segure o aparelho na mão e toque em "Vibrar".');
+  if(k === 'skip') return pulado();
+  if(navigator.vibrate){
+    stage('<div class="card">' + head(t) + '<button class="btn primary" data-s="1">📳 Vibrar</button></div>');
+    $('stage').addEventListener('click', function(e){
+      if(e.target.closest && e.target.closest('[data-s]')){ try{ navigator.vibrate([300, 150, 300, 150, 600]); }catch(err){} }
+    });
+    var r = await askBtns('Você sentiu o aparelho vibrar?', { okLabel: 'Vibrou', badLabel: 'Não vibrou' });
+    return mapear(r, 'Vibração funcionando', 'Sem vibração');
+  }
+  stage('<div class="card">' + head(t) + '<p>Este navegador (comum em iPhone/iPad) não aciona a vibração. Teste pelos Ajustes do aparelho (som e vibração) ou com o toque do teclado.</p></div>');
+  var r2 = await askBtns('O aparelho vibrou?', { okLabel: 'Vibrou', badLabel: 'Não vibrou' });
+  return mapear(r2, 'Vibração funcionando', 'Sem vibração', true);
+}
+
+async function tSensores(t){
+  stage('<div class="card">' + head(t) + '<p>Vamos checar o <b>acelerômetro e o giroscópio</b>. Depois de iniciar, incline, gire e balance o aparelho. No iPhone/iPad o sistema vai pedir permissão de movimento.</p>' +
+    '<button class="btn primary" id="sensGo">Iniciar teste</button><button class="btn ghost" id="sensSkip">Pular esta verificação</button></div>');
+  var perm = await new Promise(function(res){
+    $('sensSkip').onclick = function(){ res('skip'); };
+    $('sensGo').onclick = function(){
+      var ps = [];
+      try{ if(window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function') ps.push(DeviceMotionEvent.requestPermission()); }catch(e){}
+      try{ if(window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') ps.push(DeviceOrientationEvent.requestPermission()); }catch(e){}
+      if(!ps.length){ res('ok'); return; }
+      Promise.all(ps).then(function(r){ res(r.every(function(x){ return x === 'granted'; }) ? 'ok' : 'negado'); }).catch(function(){ res('negado'); });
+    };
+  });
+  if(perm === 'skip') return pulado();
+  if(perm === 'negado') return { status: 'pulado', detalhe: 'Permissão de sensores de movimento negada' };
+  var temEvento = ('DeviceMotionEvent' in window) || ('DeviceOrientationEvent' in window);
+  if(!temEvento){
+    stage('<div class="card">' + head(t) + '<p>Este navegador não lê os sensores de movimento. Gire o aparelho com a rotação automática ativada ou abra um app de bússola/nível.</p></div>');
+    return mapear(await askBtns('A tela girou / os sensores responderam?'), 'Sensores respondem', 'Sensores não respondem', true);
+  }
+  stage('<div class="card">' + head(t) + '<p>Incline, gire e balance o aparelho agora.</p><div class="live" id="sensLive">Aguardando dados dos sensores...</div>' +
+    '<button class="btn primary" data-k="done">Concluir</button><button class="btn bad" data-k="falha">Os sensores não respondem</button></div>');
+  var rg = { x:[1e9,-1e9], y:[1e9,-1e9], z:[1e9,-1e9] }, gyroMax = 0, oriB = [1e9,-1e9], oriG = [1e9,-1e9], ev = 0, parar = false;
+  function faixa(a, v){ if(v < a[0]) a[0] = v; if(v > a[1]) a[1] = v; }
+  function onMotion(e){
+    ev++;
+    var a = e.accelerationIncludingGravity;
+    if(a && a.x != null){ faixa(rg.x, a.x); faixa(rg.y, a.y); faixa(rg.z, a.z); }
+    var r = e.rotationRate;
+    if(r) gyroMax = Math.max(gyroMax, Math.abs(r.alpha || 0), Math.abs(r.beta || 0), Math.abs(r.gamma || 0));
+  }
+  function onOri(e){ if(e.beta != null){ ev++; faixa(oriB, e.beta); faixa(oriG, e.gamma || 0); } }
+  window.addEventListener('devicemotion', onMotion);
+  window.addEventListener('deviceorientation', onOri);
+  onCleanup(function(){ parar = true; window.removeEventListener('devicemotion', onMotion); window.removeEventListener('deviceorientation', onOri); });
+  function ok(){
+    var acc = (rg.x[1] - rg.x[0] > 3) || (rg.y[1] - rg.y[0] > 3) || (rg.z[1] - rg.z[0] > 3);
+    var gyr = gyroMax > 40 || (oriB[1] - oriB[0] > 25) || (oriG[1] - oriG[0] > 25);
+    return { acc: acc, gyr: gyr };
+  }
+  var auto = new Promise(function(res){
+    var iv = setInterval(function(){
+      if(parar){ clearInterval(iv); return; }
+      var live = $('sensLive');
+      var o = ok();
+      if(live) live.innerHTML = 'Acelerômetro: ' + (o.acc ? '✓ movimento detectado' : '… mova o aparelho') + '<br>Giroscópio/orientação: ' + (o.gyr ? '✓ giro detectado' : '… gire o aparelho');
+      if(o.acc && o.gyr){ clearInterval(iv); setTimeout(function(){ res('auto'); }, 600); }
+    }, 200);
+    onCleanup(function(){ clearInterval(iv); });
+  });
+  var r = await Promise.race([auto, choose()]);
+  var o = ok();
+  if(r === 'auto') return { status: 'ok', detalhe: 'Acelerômetro e giroscópio respondendo' };
+  if(r === 'falha') return { status: 'falha', detalhe: 'Sensores de movimento não respondem' };
+  if(ev === 0) return { status: 'falha', detalhe: 'Nenhum dado recebido dos sensores de movimento' };
+  if(o.acc || o.gyr) return { status: 'atencao', detalhe: (o.acc ? 'Acelerômetro ok' : 'Acelerômetro sem variação') + '; ' + (o.gyr ? 'giroscópio ok' : 'giroscópio sem variação') };
+  return { status: 'atencao', detalhe: 'Sensores enviam dados, mas sem movimento suficiente para avaliar' };
+}
+
+async function tBateria(t){
+  var k = await intro(t, 'Esta verificação testa a <b>entrada de carregamento</b>. Quando pedir, conecte o carregador (ou desconecte e conecte de novo se já estiver carregando).');
+  if(k === 'skip') return pulado();
+  if(!navigator.getBattery){
+    stage('<div class="card">' + head(t) + '<p>Conecte o carregador ao aparelho agora.</p></div>');
+    var r0 = await askBtns('O aparelho reconheceu o carregador (ícone de raio, vibração ou animação de carga)?', { okLabel: 'Reconheceu', badLabel: 'Não carrega' });
+    return mapear(r0, 'Carregador reconhecido', 'Não reconhece o carregador / não carrega', true);
+  }
+  var b = await navigator.getBattery();
+  var visto = false, parar = false;
+  stage('<div class="card">' + head(t) + '<p>Conecte o carregador agora.</p><div class="live" id="batLive"></div>' +
+    '<button class="btn bad" data-k="falha">Não reconhece o carregador</button><button class="btn ghost" data-k="skip">Pular</button></div>');
+  function pintar(){
+    var el = $('batLive');
+    if(el) el.innerHTML = 'Nível: ' + Math.round(b.level * 100) + '%<br>Estado: ' + (b.charging ? '🔌 carregando' : 'na bateria') + (visto ? '<br>✓ Conexão do carregador detectada' : '');
+  }
+  pintar();
+  var auto = new Promise(function(res){
+    var h = function(){ visto = true; pintar(); setTimeout(function(){ res('auto'); }, 900); };
+    b.addEventListener('chargingchange', h);
+    b.addEventListener('levelchange', pintar);
+    onCleanup(function(){ b.removeEventListener('chargingchange', h); b.removeEventListener('levelchange', pintar); });
+  });
+  var r = await Promise.race([auto, choose()]);
+  var nivel = Math.round(b.level * 100);
+  if(r === 'auto') return { status: 'ok', detalhe: 'Carregador detectado · nível ' + nivel + '%' + (b.charging ? ' (carregando)' : '') };
+  if(r === 'falha') return { status: 'falha', detalhe: 'Não reconhece o carregador (nível ' + nivel + '%)' };
+  return pulado();
+}
+
+async function tGps(t){
+  var k = await intro(t, 'Vamos buscar o sinal de GPS. Se possível, fique <b>perto de uma janela ou ao ar livre</b>. O navegador vai pedir permissão de localização (os dados não são guardados).');
+  if(k === 'skip') return pulado();
+  if(!navigator.geolocation) return { status: 'nao_suportado', detalhe: 'Navegador sem acesso à localização' };
+  stage('<div class="card">' + head(t) + '<div class="spinner"></div><p class="center">Buscando sinal de GPS (até 25 s)...</p></div>');
+  return await new Promise(function(res){
+    navigator.geolocation.getCurrentPosition(function(pos){
+      res({ status: 'ok', detalhe: 'Sinal obtido · precisão ±' + Math.round(pos.coords.accuracy) + ' m' });
+    }, function(err){
+      if(err.code === 1) res({ status: 'pulado', detalhe: 'Permissão de localização negada' });
+      else res({ status: 'atencao', detalhe: 'Sem sinal de GPS no tempo limite (repita ao ar livre)' });
+    }, { enableHighAccuracy: true, timeout: 25000, maximumAge: 0 });
+  });
+}
+
+async function tRede(t){
+  stage('<div class="card">' + head(t) + '<div class="spinner"></div><p class="center">Medindo a conexão...</p></div>');
+  var online = navigator.onLine !== false;
+  if(!online) return { status: 'falha', detalhe: 'Aparelho sem conexão com a internet' };
+  var ms = null;
+  try{
+    if(sb){
+      var t0 = performance.now();
+      var r = await sb.from('diagnosticos').select('id').eq('id', SESSION || '00000000-0000-0000-0000-000000000000').limit(1);
+      ms = Math.round(performance.now() - t0);
+      if(r.error) throw r.error;
+    }else{
+      var t1 = performance.now();
+      await fetch(SUPABASE_URL + '/auth/v1/health', { headers: { apikey: SUPABASE_ANON_KEY }, cache: 'no-store' });
+      ms = Math.round(performance.now() - t1);
+    }
+  }catch(e){ return { status: 'falha', detalhe: 'Não conseguiu acessar a internet / servidor' }; }
+  var con = navigator.connection, extra = [];
+  if(con){ if(con.type) extra.push(con.type); if(con.effectiveType) extra.push(con.effectiveType); if(con.downlink) extra.push(con.downlink + ' Mbps'); }
+  var det = 'Conectado · resposta em ' + ms + ' ms' + (extra.length ? ' · ' + extra.join(' · ') : '');
+  return { status: ms > 3000 ? 'atencao' : 'ok', detalhe: ms > 3000 ? det + ' (conexão lenta)' : det };
+}
+
+var MANUAIS = [
+  ['botao_power','Botão liga/desliga'], ['botao_volume','Botões de volume'], ['biometria','Biometria / Face ID / leitor digital'],
+  ['conector_carga','Entrada de carregador (cabo encaixa firme)'], ['conector_fone','Entrada de fone / áudio'],
+  ['sim','Chip (SIM) reconhecido e com sinal'], ['wifi','Wi-Fi conecta e navega'], ['bluetooth','Bluetooth pareia'],
+  ['mic_ligacao','Microfone em ligação'], ['auricular','Alto-falante auricular (ouvir em ligação)'],
+  ['proximidade','Sensor de proximidade (apaga a tela na ligação)'], ['carcaca','Carcaça / tela: trincos, amassados ou folgas']
+];
+async function tManuais(t){
+  var linhas = MANUAIS.map(function(m){
+    return '<div class="mrow" data-key="' + m[0] + '"><div class="t">' + esc(m[1]) + '</div><div class="seg">' +
+      '<button data-v="ok">✓</button><button data-v="falha">✕</button><button data-v="na">N/A</button></div></div>';
+  }).join('');
+  stage('<div class="card">' + head(t) + '<p>O navegador não consegue testar estes itens. Marque o que você já conferiu: <b>✓ funciona</b>, <b>✕ defeito</b> ou N/A. O que ficar sem marca não entra no laudo.</p>' + linhas +
+    '<button class="btn primary" data-k="done">Concluir</button></div>');
+  var sel = {};
+  $('stage').addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('[data-v]') : null;
+    if(!b) return;
+    var row = b.closest('.mrow'), key = row.getAttribute('data-key');
+    sel[key] = b.getAttribute('data-v');
+    [].forEach.call(row.querySelectorAll('button'), function(x){ x.className = ''; });
+    b.className = 'on-' + sel[key];
+  });
+  await choose();
+  var multi = [];
+  MANUAIS.forEach(function(m){
+    var v = sel[m[0]];
+    if(v === 'ok') multi.push({ key: m[0], label: m[1], status: 'ok', detalhe: 'Verificado manualmente' });
+    else if(v === 'falha') multi.push({ key: m[0], label: m[1], status: 'falha', detalhe: 'Defeito apontado manualmente' });
+  });
+  return { multi: multi };
+}
+
+TESTES = [
+  { key:'tela_cores',  label:'Cores da tela',      icon:'🖥️', fn:tCores },
+  { key:'toque',       label:'Toque na tela',      icon:'👆', fn:tToque },
+  { key:'multitoque',  label:'Multitoque',         icon:'🖐️', fn:tMulti },
+  { key:'alto_falante',label:'Alto-falante',       icon:'🔊', fn:tAudio },
+  { key:'microfone',   label:'Microfone',          icon:'🎙️', fn:tMic },
+  { key:'camera_traseira', label:'Câmera traseira',icon:'📷', fn:function(t){ return tCamera(t, 'environment', 'traseira'); } },
+  { key:'camera_frontal',  label:'Câmera frontal', icon:'🤳', fn:function(t){ return tCamera(t, 'user', 'frontal'); } },
+  { key:'lanterna',    label:'Lanterna',           icon:'🔦', fn:tLanterna },
+  { key:'vibracao',    label:'Vibração',           icon:'📳', fn:tVibra },
+  { key:'sensores',    label:'Sensores de movimento', icon:'🧭', fn:tSensores },
+  { key:'carregador',  label:'Entrada de carregador', icon:'🔌', fn:tBateria },
+  { key:'gps',         label:'GPS',                icon:'📍', fn:tGps },
+  { key:'rede',        label:'Internet / rede',    icon:'📶', fn:tRede },
+  { key:'manuais',     label:'Conferência manual', icon:'📝', fn:tManuais }
+];
+TESTES.forEach(function(t, i){ t.n = i + 1; });
+
+/* ---------- Fluxo ---------- */
+var ROTULO = { ok:'Funcionando', falha:'Com defeito', atencao:'Atenção', pulado:'Não testado', nao_suportado:'Não testável aqui' };
+async function rodar(){
+  for(var i = 0; i < TESTES.length; i++){
+    var t = TESTES[i];
+    setProgress(i, TESTES.length);
+    var r;
+    try{ r = await t.fn(t); }
+    catch(e){ console.error(e); r = { status: 'pulado', detalhe: 'Erro ao executar: ' + (e && e.message ? e.message : e) }; }
+    cleanup();
+    if(r && r.multi){ r.multi.forEach(function(m){ registrar(m.key, m.label, m.status, m.detalhe); }); }
+    else if(r){ registrar(t.key, t.label, r.status, r.detalhe); }
+    await salvar('em_andamento');
+  }
+  setProgress(TESTES.length, TESTES.length);
+  mostrarResultado();
+}
+function textoCompleto(){
+  var linhas = ['Diagnóstico UpTECH — ' + new Date().toLocaleString('pt-BR')];
+  (state.info.campos || []).forEach(function(c){ linhas.push(c.k + ': ' + c.v); });
+  linhas.push('');
+  linhas.push(gerarResumo());
+  linhas.push('');
+  state.resultados.forEach(function(r){ linhas.push('[' + ROTULO[r.status] + '] ' + r.label + (r.detalhe ? ' — ' + r.detalhe : '')); });
+  if(state.notas) linhas.push('', 'Observações: ' + state.notas);
+  return linhas.join('\n');
+}
+function mostrarResultado(){
+  var c = contar();
+  var lista = state.resultados.map(function(r){
+    return '<div class="res"><div class="l">' + esc(r.label) + (r.detalhe ? '<small>' + esc(r.detalhe) + '</small>' : '') + '</div><span class="badge b-' + r.status + '">' + ROTULO[r.status] + '</span></div>';
+  }).join('');
+  stage('<div class="card"><div class="step">Resultado</div><h2>Diagnóstico concluído</h2>' +
+    '<div class="sum"><span class="badge b-ok">' + c.ok + ' ok</span>' +
+    (c.falha ? '<span class="badge b-falha">' + c.falha + ' com defeito</span>' : '') +
+    (c.atencao ? '<span class="badge b-atencao">' + c.atencao + ' em atenção</span>' : '') +
+    ((c.pulado + c.nao_suportado) ? '<span class="badge b-pulado">' + (c.pulado + c.nao_suportado) + ' não testadas</span>' : '') + '</div>' +
+    lista + '</div>' +
+    '<div class="card"><div class="q" style="margin-top:0">Observações do técnico (opcional)</div><textarea id="notas" placeholder="Ex.: tela com mancha no canto superior, bateria viciada..."></textarea>' +
+    '<button class="btn primary" id="fim">' + (SESSION ? 'Finalizar e enviar para a UpTECH' : 'Copiar resumo') + '</button>' +
+    (SESSION ? '<button class="btn alt" id="copiar">Copiar resumo</button>' : '') + '</div>');
+  async function copiar(){
+    state.notas = $('notas').value.trim();
+    var txt = textoCompleto();
+    try{ await navigator.clipboard.writeText(txt); alert('Resumo copiado!'); }
+    catch(e){ prompt('Copie o resumo abaixo:', txt); }
+  }
+  if(SESSION){
+    $('copiar').onclick = copiar;
+    $('fim').onclick = async function(){
+      var btn = $('fim');
+      btn.disabled = true; btn.textContent = 'Enviando...';
+      state.notas = $('notas').value.trim();
+      var ok = await salvar('concluido');
+      if(ok){
+        stage('<div class="card center"><div style="font-size:46px">✅</div><h2>Resultado enviado!</h2><p>O laudo já está no sistema da UpTECH. Pode voltar ao computador.</p></div>');
+        $('progWrap').style.display = 'none';
+      }else{
+        btn.disabled = false; btn.textContent = 'Tentar enviar de novo';
+        alert('Não consegui enviar agora. Verifique a internet e toque de novo.');
+      }
+    };
+  }else{
+    $('fim').onclick = copiar;
+  }
+}
+
+/* ---------- Início ---------- */
+async function boot(){
+  var uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if(SESSION){
+    if(!uuid.test(SESSION) || !sb){
+      stage('<div class="card center"><div style="font-size:42px">⚠️</div><h2>Link inválido</h2><p>Peça um novo link/QR code no sistema da UpTECH.</p></div>');
+      return;
+    }
+    try{
+      var r = await sb.from('diagnosticos').select('id,status,resumo').eq('id', SESSION).limit(1);
+      var row = r.data && r.data[0];
+      if(r.error || !row){
+        stage('<div class="card center"><div style="font-size:42px">⚠️</div><h2>Sessão não encontrada</h2><p>Esse link expirou ou foi removido. Peça um novo no sistema da UpTECH.</p></div>');
+        return;
+      }
+      if(row.status === 'concluido'){
+        stage('<div class="card center"><div style="font-size:42px">✅</div><h2>Diagnóstico já concluído</h2><p>Este teste já foi finalizado. Para refazer, gere um novo link no sistema.</p></div>');
+        return;
+      }
+      state.row = row;
+    }catch(e){
+      stage('<div class="card center"><div style="font-size:42px">⚠️</div><h2>Sem conexão</h2><p>Não consegui falar com o servidor. Verifique a internet e recarregue a página.</p></div>');
+      return;
+    }
+  }
+  state.info = await coletarInfo();
+  setSync(true, 'conectado ao sistema');
+  if(SESSION) await salvar('conectado');
+  var info = (state.info.campos || []).map(function(c){ return '<dt>' + esc(c.k) + '</dt><dd>' + esc(c.v) + '</dd>'; }).join('');
+  stage((SESSION ? '' : '<div class="notice"><b>Modo avulso:</b> o resultado ficará só neste aparelho. Para enviar ao sistema, abra o link ou QR code gerado na tela Diagnóstico da UpTECH.</div>') +
+    '<div class="card"><div class="step">Aparelho detectado</div><h2>Informações do aparelho</h2><dl class="info">' + info + '</dl></div>' +
+    '<div class="card"><h2>' + TESTES.length + ' verificações</h2><p>Leva cerca de 3 a 5 minutos. Você pode pular qualquer teste. Alguns pedem permissão (câmera, microfone, localização) — nada é gravado, só o resultado do teste.</p>' +
+    '<button class="btn primary" id="comecar">Iniciar diagnóstico</button></div>');
+  $('comecar').onclick = function(){ rodar(); };
+}
+boot();
+</script>
+</body>
+</html>
