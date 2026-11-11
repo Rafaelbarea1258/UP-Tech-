@@ -1015,13 +1015,13 @@ async function renderDiagnostico(){
   document.getElementById('content').innerHTML =
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:20px;">' +
       '<div class="card">' +
-        '<div style="font-size:15px;font-weight:700;margin-bottom:4px;">&#128241; Testar pelo próprio aparelho</div>' +
-        '<p class="hint" style="font-size:13px;margin:0 0 12px;">Funciona em <b>Android, iPhone, iPad e tablets</b>. Gera um QR code: o cliente/técnico abre no aparelho, faz os testes (tela, toque, som, câmeras, sensores, bateria...) e o resultado aparece aqui na hora.</p>' +
+        '<div style="font-size:15px;font-weight:700;margin-bottom:4px;">&#128241; Testar pelo próprio aparelho (Android e iOS/Apple)</div>' +
+        '<p class="hint" style="font-size:13px;margin:0 0 12px;">Funciona em <b>Android e iOS (iPhone e iPad da Apple)</b> e tablets. Gera um QR code: o cliente/técnico abre no aparelho, faz os testes (tela, toque, som, câmeras, sensores, bateria...) e o resultado aparece aqui na hora.</p>' +
         '<button class="btn btn-primary" id="diagNovo">Novo diagnóstico (QR code)</button>' +
       '</div>' +
       '<div class="card">' +
         '<div style="font-size:15px;font-weight:700;margin-bottom:4px;">&#128268; Ler Android por cabo USB</div>' +
-        '<p class="hint" style="font-size:13px;margin:0 0 12px;">Plugue o celular/tablet <b>Android</b> neste computador e leia bateria, armazenamento, memória, chip e software automaticamente. Precisa de <b>Chrome ou Edge</b> e Depuração USB ativada no aparelho.</p>' +
+        '<p class="hint" style="font-size:13px;margin:0 0 12px;">Plugue o celular/tablet <b>Android</b> neste computador e leia bateria, armazenamento, memória, chip e software automaticamente. Precisa de <b>Chrome ou Edge</b> e Depuração USB ativada no aparelho. Para <b>iPhone/iPad (iOS)</b>, use o teste por QR code ao lado.</p>' +
         '<button class="btn btn-secondary" id="diagUsb">Ler aparelho por USB</button>' +
       '</div>' +
     '</div>' +
