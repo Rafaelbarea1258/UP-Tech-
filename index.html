@@ -945,7 +945,7 @@ const DIAG_TESTE_BADGE = { ok:'badge-good', falha:'badge-critical', atencao:'bad
 const DIAG_LIB_ADB = 'https://cdn.jsdelivr.net/npm/@yume-chan/adb@2.6.4/+esm';
 const DIAG_LIB_WEBUSB = 'https://cdn.jsdelivr.net/npm/@yume-chan/adb-daemon-webusb@2.3.2/+esm';
 const DIAG_LIB_CRED = 'https://cdn.jsdelivr.net/npm/@yume-chan/adb-credential-web@2.1.0/+esm';
-const DIAG_LIB_QR = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';
+const DIAG_LIB_QR = 'https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js';
 let diagPoll = null;
 
 function diagLink(id){
@@ -977,10 +977,10 @@ function diagPilulas(testes){
 }
 function diagCarregarQr(){
   return new Promise(function(res){
-    if(window.QRCode) return res(true);
+    if(window.QRious) return res(true);
     const sc = document.createElement('script');
     sc.src = DIAG_LIB_QR;
-    sc.onload = function(){ res(!!window.QRCode); };
+    sc.onload = function(){ res(!!window.QRious); };
     sc.onerror = function(){ res(false); };
     document.head.appendChild(sc);
   });
@@ -1082,7 +1082,7 @@ async function diagMostrarSessao(id){
   diagCarregarQr().then(function(ok){
     const cv = document.getElementById('diagQr');
     if(!cv) return;
-    if(ok && window.QRCode){ window.QRCode.toCanvas(cv, url, { width: 220, margin: 1 }, function(err){ if(err) document.getElementById('diagQrMsg').textContent = 'Não foi possível gerar o QR. Use o link abaixo.'; }); }
+    if(ok && window.QRious){ try{ new window.QRious({ element: cv, value: url, size: 220, level: 'M' }); }catch(err){ document.getElementById('diagQrMsg').textContent = 'Não foi possível gerar o QR. Use o link abaixo.'; } }
     else{ cv.style.display = 'none'; document.getElementById('diagQrMsg').textContent = 'Não foi possível carregar o gerador de QR. Use o link abaixo.'; }
   });
   if(diagPoll) clearInterval(diagPoll);
