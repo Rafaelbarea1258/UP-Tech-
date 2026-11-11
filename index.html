@@ -1003,9 +1003,9 @@ async function renderDiagnostico(){
     return '<tr>' +
       '<td>#' + String(d.numero).padStart(2, '0') + '</td>' +
       '<td>' + fmtDateTime(d.created_at) + '</td>' +
-      '<td><strong>' + escapeHtml(diagNome(d)) + '</strong><div class="hint">' + (d.origem === 'usb' ? 'Leitura por USB' : 'Teste no aparelho') + (d.dados && d.dados.sistema ? ' · ' + escapeHtml(d.dados.sistema) : '') + '</div></td>' +
+      '<td><strong>' + escapeHtml(diagNome(d)) + '</strong><div class="hint">' + diagOrigemTxt(d) + (d.dados && d.dados.sistema ? ' · ' + escapeHtml(d.dados.sistema) : '') + '</div></td>' +
       '<td>' + diagBadge(d.status) + '</td>' +
-      '<td>' + diagPilulas(d.testes) + '</td>' +
+      '<td>' + (d.origem === 'triagem' ? diagTriagemPilula(d) : diagPilulas(d.testes)) + '</td>' +
       '<td>' + vinculo + '</td>' +
       '<td style="white-space:nowrap;">' + abrirLink +
         '<button class="btn btn-sm btn-primary" data-diag-ver="' + d.id + '">Abrir laudo</button> ' +
@@ -1024,6 +1024,11 @@ async function renderDiagnostico(){
         '<p class="hint" style="font-size:13px;margin:0 0 12px;">Plugue o celular/tablet <b>Android</b> neste computador e leia bateria, armazenamento, memória, chip e software automaticamente. Precisa de <b>Chrome ou Edge</b> e Depuração USB ativada no aparelho. Para <b>iPhone/iPad (iOS)</b>, use o teste por QR code ao lado.</p>' +
         '<button class="btn btn-secondary" id="diagUsb">Ler aparelho por USB</button>' +
       '</div>' +
+      '<div class="card">' +
+        '<div style="font-size:15px;font-weight:700;margin-bottom:4px;">&#128295; Aparelho que não liga? Triagem de defeito</div>' +
+        '<p class="hint" style="font-size:13px;margin:0 0 12px;">Para celular que não liga, está sem imagem ou não carrega: responda o que você observa e o sistema mostra a causa mais provável (bateria, conector, tela ou placa), a suspeita de defeito na placa e o que testar primeiro.</p>' +
+        '<button class="btn btn-primary" id="diagTriagem">Abrir triagem de defeito</button>' +
+      '</div>' +
     '</div>' +
     '<div class="card">' +
       '<h2 style="font-size:13px;margin:0 0 12px;color:var(--text-secondary);text-transform:uppercase;">' + lista.length + ' diagnósticos</h2>' +
@@ -1033,6 +1038,7 @@ async function renderDiagnostico(){
     '</div>';
   document.getElementById('diagNovo').onclick = diagNovaSessao;
   document.getElementById('diagUsb').onclick = diagLerUsb;
+  document.getElementById('diagTriagem').onclick = diagTriagemAbrir;
   document.querySelectorAll('[data-diag-ver]').forEach(function(b){ b.onclick = function(){ diagVerLaudo(b.dataset.diagVer); }; });
   document.querySelectorAll('[data-diag-link]').forEach(function(b){ b.onclick = function(){ diagMostrarSessao(b.dataset.diagLink); }; });
   document.querySelectorAll('[data-diag-del]').forEach(function(b){
@@ -1114,6 +1120,7 @@ async function diagVerLaudo(id){
   if(error || !d){ toast('Laudo não encontrado', 'err'); return; }
   if(!state.cache.clientes) state.cache.clientes = await sbSelect('clientes');
   if(!state.cache.os) state.cache.os = await sbSelect('ordens_servico');
+  if(d.origem === 'triagem'){ diagTriagemLaudo(d); return; }
   const x = d.dados || {};
   const campos = (x.campos || []).map(function(c){ return '<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--gridline);font-size:13px;"><span style="color:var(--text-secondary);">' + escapeHtml(c.k) + '</span><strong style="text-align:right;">' + escapeHtml(c.v) + '</strong></div>'; }).join('');
   const testes = (d.testes || []).map(function(t){
@@ -1163,6 +1170,7 @@ async function diagVerLaudo(id){
   };
 }
 function diagImprimir(d){
+  if(d.origem === 'triagem'){ diagTriagemImprimir(d); return; }
   const x = d.dados || {};
   const cor = { ok:'#0a6b0a', falha:'#96201f', atencao:'#8a5c00', pulado:'#52514e', nao_suportado:'#52514e' };
   const campos = (x.campos || []).map(function(c){ return '<tr><td>' + escapeHtml(c.k) + '</td><td><b>' + escapeHtml(c.v) + '</b></td></tr>'; }).join('');
@@ -1274,6 +1282,572 @@ async function diagLerUsb(){
       go.disabled = false; go.textContent = 'Tentar de novo';
     }
   };
+}
+
+/* ===== TRIAGEM DE DEFEITO (aparelho que não liga): motor de regras ===== */
+const TRI_CAUSAS = {
+  bateria:  { nome:'Bateria', area:'carga', desc:'Descarregada em excesso, viciada, desgastada ou estufada.',
+    passos:['Medir a tensão da bateria fora do aparelho: abaixo de 3,0 V indica descarga profunda (tente carga lenta e controlada).','Testar com uma bateria conhecida boa ou com fonte de bancada no lugar da bateria.','Bateria estufada ou deformada: trocar imediatamente, não carregar.'] },
+  conector: { nome:'Conector / flex de carga', area:'carga', desc:'Pinos sujos, oxidados, tortos ou conector solto, sem fazer contato com o cabo.',
+    passos:['Limpar o conector com palito não condutor e álcool isopropílico e olhar os pinos com lupa.','Testar a carga em posições diferentes do cabo (folga ou contato intermitente).','Trocar o conector ou o flex de carga e testar de novo.'] },
+  cabo:     { nome:'Cabo ou carregador', area:'carga', desc:'Cabo ou fonte sem entregar corrente suficiente.',
+    passos:['Testar o mesmo cabo e a mesma fonte em outro aparelho que carregue normalmente.','Trocar por cabo e carregador originais ou de qualidade conhecida.','Usar outra tomada ou porta USB.'] },
+  ic_carga: { nome:'IC de carga / gestão de energia', area:'placa', desc:'Circuito integrado que controla carga e alimentação (PMIC, Tristar/Hydra no iPhone) com falha.',
+    passos:['Medir a tensão no pino VBUS do conector com o carregador ligado.','Medir a linha de bateria (VBAT) e a de carga na placa; comparar com um aparelho do mesmo modelo.','Se houver tensão na entrada mas nada na saída, suspeitar do IC de carga (reparo de placa).'] },
+  curto:    { nome:'Curto-circuito na placa', area:'placa', desc:'Componente em curto puxando corrente e derrubando a alimentação; costuma esquentar.',
+    passos:['Medir a resistência/diodo nas linhas principais (VBAT, VBUS, VDD_MAIN) contra o terra.','Usar fonte de bancada com limite de corrente: corrente alta e fixa indica curto.','Localizar o componente quente com câmera térmica ou álcool isopropílico na placa (evapora primeiro onde esquenta).'] },
+  tela:     { nome:'Tela (display) ou flat', area:'tela', desc:'Display danificado ou flat/conector da tela com mau contato; o aparelho pode estar ligado, só sem imagem.',
+    passos:['Trocar por uma tela conhecida boa e testar.','Reencaixar e inspecionar os conectores da tela e os flats.','Ligar para o aparelho, tocar e ver se vibra ou emite som: se sim, a placa está viva e o problema tende a ser a imagem.'] },
+  backlight:{ nome:'Backlight (iluminação da tela)', area:'tela', desc:'Imagem existe, mas sem iluminação: aparece fraca com lanterna.',
+    passos:['Com uma lanterna forte de lado, ver se há imagem fraca.','Testar com outra tela para separar defeito da tela de defeito na placa.','Medir o circuito de backlight na placa (bobina, diodo, IC de backlight).'] },
+  cpu_mem:  { nome:'CPU, memória ou armazenamento', area:'placa', desc:'Falha no processador, memória ou armazenamento; costuma causar loop de logo, travar ou erro de restauração.',
+    passos:['Testar se o aparelho entra em modo de recuperação (iPhone: Recovery/DFU; Android: download/EDL).','Tentar restaurar o firmware e observar o código de erro (erros recorrentes apontam hardware).','Se a restauração falha de forma consistente, avaliar reparo de placa (memória/CPU).'] },
+  software: { nome:'Software / firmware', area:'software', desc:'Sistema corrompido: o hardware está bom, mas o aparelho não consegue iniciar.',
+    passos:['Tentar entrar no modo de recuperação e restaurar ou atualizar o sistema.','Fazer backup antes, sempre que possível.','Se restaurar normalmente e voltar a ligar, o hardware está ok.'] },
+  botao:    { nome:'Botão power / flex do botão', area:'botao', desc:'Botão que não aciona, preso ou com flex defeituoso.',
+    passos:['Testar o botão com multímetro (continuidade).','Tentar ligar por outros meios (ligar o carregador, combinação de teclas).','Trocar o flex ou o botão.'] },
+  oxid:     { nome:'Oxidação / dano por líquido', area:'placa', desc:'Corrosão na placa ou nos conectores após contato com líquido ou umidade.',
+    passos:['Desmontar e inspecionar corrosão (verde, branca ou escura) em conectores e ICs.','Limpar com álcool isopropílico 99% e escova ou ultrassom.','Após limpar, repetir os testes de curto antes de tentar ligar.'] }
+};
+const TRI_AREAS = {
+  carga:    'Bateria e carregamento',
+  tela:     'Tela e imagem',
+  placa:    'Placa (hardware)',
+  software: 'Software',
+  botao:    'Botões'
+};
+const TRI_CAUSAS_ORDEM = ['bateria','conector','cabo','ic_carga','curto','tela','backlight','cpu_mem','software','botao','oxid'];
+const TRI_PRIOR = { bateria:1.4, conector:1.3, cabo:1.0, ic_carga:1.0, curto:0.8, tela:1.3, backlight:0.8, cpu_mem:0.8, software:1.0, botao:0.5, oxid:0.5 };
+
+/* Perguntas (única escolha). Cada opção multiplica a plausibilidade de cada causa. */
+const TRI_PERGUNTAS = [
+  { id:'tela', titulo:'O que aparece na tela?', opcoes:[
+    { v:'preta', t:'Preta, sem nenhum sinal de vida', f:{ bateria:1.8, conector:1.5, cabo:1.5, ic_carga:1.8, curto:1.8, cpu_mem:1.3, botao:1.2 } },
+    { v:'preta_vibra', t:'Preta, mas vibra, toca ou recebe notificação', f:{ tela:5, backlight:3.5, software:1.2, bateria:0.3, conector:0.3, cabo:0.3, ic_carga:0.3, curto:0.15, botao:0.3, cpu_mem:0.5, oxid:0.6 } },
+    { v:'lanterna', t:'Imagem muito fraca, só vista com lanterna', f:{ backlight:7, tela:1.3, bateria:0.15, conector:0.2, cabo:0.2, ic_carga:0.25, curto:0.1, botao:0.2, cpu_mem:0.3, software:0.4, oxid:0.5 } },
+    { v:'logo', t:'Mostra o logo e trava ou reinicia', f:{ software:4, cpu_mem:3, bateria:1.8, tela:0.15, backlight:0.15, conector:0.3, cabo:0.3, ic_carga:0.5, curto:0.3, botao:1.2, oxid:0.7 } },
+    { v:'listras', t:'Listras, manchas ou toque maluco', f:{ tela:7, backlight:0.8, bateria:0.2, conector:0.2, cabo:0.2, ic_carga:0.3, curto:0.2, botao:0.2, cpu_mem:0.5, software:0.6, oxid:1.2 } },
+    { v:'quebrada', t:'Tela quebrada ou vazando', f:{ tela:8, backlight:0.8, bateria:0.4, conector:0.4, cabo:0.4, ic_carga:0.4, curto:0.3, botao:0.4, cpu_mem:0.6, software:0.6 } }
+  ] },
+  { id:'carga', titulo:'Ao ligar o carregador (original) por 10 minutos ou mais', opcoes:[
+    { v:'nada', t:'Nada acontece', f:{ bateria:1.3, conector:1.8, cabo:1.8, ic_carga:1.8, curto:1.6, oxid:1.3, tela:0.7, backlight:0.6, software:0.5 } },
+    { v:'simbolo', t:'Aparece o símbolo de carga ou bateria vazia', f:{ conector:0.3, cabo:0.3, ic_carga:0.4, curto:0.4, bateria:1.6, tela:1.6, backlight:1.5, software:1.3, cpu_mem:0.8 } },
+    { v:'vibra', t:'Vibra ou apita ao conectar', f:{ conector:0.2, cabo:0.2, ic_carga:0.5, curto:0.3, bateria:0.6, tela:2.5, backlight:2.2, software:1.2, cpu_mem:0.8 } },
+    { v:'esquenta', t:'Esquenta muito rápido (placa ou conector)', f:{ curto:4, ic_carga:2.5, oxid:2, conector:1.5, cabo:0.8, bateria:1.2, software:0.3, tela:0.4, backlight:0.3 } },
+    { v:'lenta', t:'Carrega bem devagar ou a bateria cai rápido', f:{ bateria:3, conector:1.8, cabo:1.5, ic_carga:1.3, curto:0.5, tela:0.8 } },
+    { v:'posicao', t:'Só carrega em certa posição ou com o cabo solto', f:{ conector:4, cabo:1.4, bateria:0.7, ic_carga:0.7, curto:0.5, tela:0.6, software:0.6 } }
+  ] },
+  { id:'botao', titulo:'Segurando o botão power por 15 segundos', opcoes:[
+    { v:'nada', t:'Nada acontece', f:{ bateria:1.3, curto:1.6, ic_carga:1.4, cpu_mem:1.4, botao:2.2, tela:0.6, backlight:0.6, software:0.6 } },
+    { v:'vibra', t:'Vibra', f:{ tela:2.5, backlight:2, bateria:0.5, curto:0.3, ic_carga:0.4, cpu_mem:0.7, software:1.3, botao:0.4 } },
+    { v:'som', t:'Faz som ou toca', f:{ tela:3, backlight:2.5, bateria:0.4, curto:0.2, ic_carga:0.3, botao:0.3, software:1.3, cpu_mem:0.6 } },
+    { v:'loop', t:'Reinicia em loop', f:{ software:3.5, cpu_mem:2.5, bateria:1.8, curto:0.3, tela:0.6, backlight:0.5, botao:1.5 } }
+  ] },
+  { id:'usb', titulo:'Ao plugar no computador por USB', opcoes:[
+    { v:'nao_aparece', t:'Não aparece nada no computador', f:{ conector:1.8, ic_carga:1.4, curto:1.8, bateria:1.5, cpu_mem:1.5, cabo:1.8, tela:0.6, backlight:0.5, software:0.4, botao:1.0 } },
+    { v:'normal', t:'Aparece normalmente (modo normal)', f:{ tela:2.5, backlight:2, software:1.2, conector:0.3, ic_carga:0.4, curto:0.15, bateria:0.5, cpu_mem:0.5, botao:0.5, cabo:0.2, oxid:0.5 } },
+    { v:'especial', t:'Aparece em modo especial (DFU, Recovery, Download, EDL, Fastboot)', f:{ software:3.5, cpu_mem:2.5, tela:0.8, backlight:0.6, conector:0.3, ic_carga:0.4, curto:0.2, bateria:0.6, cabo:0.2 } },
+    { v:'liga_desliga', t:'Aparece e some repetidamente', f:{ bateria:1.8, software:2.5, cpu_mem:2, curto:1.3, conector:1.5, botao:1.2 } }
+  ] },
+  { id:'calor', titulo:'Aquecimento e cheiro', opcoes:[
+    { v:'esquenta', t:'Esquenta mesmo sem ligar', f:{ curto:3.5, ic_carga:2, oxid:1.5, bateria:1.3, tela:0.5, backlight:0.5 } },
+    { v:'cheiro', t:'Cheiro de queimado ou ponto quente visível', f:{ curto:4, oxid:1.5, ic_carga:2, tela:0.4, backlight:0.4 } },
+    { v:'frio', t:'Fica frio', f:{ curto:0.4, ic_carga:0.8, bateria:1.2, conector:1.2, cabo:1.2 } }
+  ] },
+  { id:'conector_visual', titulo:'Olhando o conector de carga', opcoes:[
+    { v:'sujo', t:'Sujo, oxidado ou com resíduo', f:{ conector:3, oxid:1.5 } },
+    { v:'folga', t:'Dobrado, com folga ou pino torto', f:{ conector:3.5 } },
+    { v:'limpo', t:'Limpo e firme', f:{ conector:0.6 } }
+  ] },
+  { id:'cabo_testado', titulo:'O cabo e a fonte já foram testados em outro aparelho?', opcoes:[
+    { v:'ok', t:'Sim, carregam outro aparelho normalmente', f:{ cabo:0.25 } },
+    { v:'ruim', t:'Sim, e também não funcionam em outro aparelho', f:{ cabo:5, conector:0.5, ic_carga:0.5, curto:0.5 } }
+  ] }
+];
+/* Histórico (marcar todos que se aplicam). */
+const TRI_HISTORICO = [
+  { v:'queda', t:'Sofreu queda ou impacto', f:{ tela:1.6, conector:1.5, botao:1.2, cpu_mem:1.4, curto:1.3, bateria:1.2 } },
+  { v:'agua', t:'Teve contato com água ou umidade', f:{ oxid:4, curto:2.5, conector:1.8, ic_carga:1.8, bateria:1.3, tela:1.4 } },
+  { v:'tela_nova', t:'Trocou a tela recentemente', f:{ tela:2.5, backlight:1.8, curto:1.2 } },
+  { v:'bateria_nova', t:'Trocou a bateria recentemente', f:{ bateria:1.6, curto:1.3, ic_carga:1.3 } },
+  { v:'reparo_placa', t:'Já passou por reparo de placa', f:{ cpu_mem:1.8, curto:1.5, ic_carga:1.5 } },
+  { v:'atualizacao', t:'Parou depois de uma atualização do sistema', f:{ software:3, cpu_mem:1.3 } },
+  { v:'superaquecimento', t:'Superaqueceu antes de parar', f:{ bateria:1.8, cpu_mem:1.6, curto:1.2 } },
+  { v:'bateria_estufada', t:'Bateria estufada ou deformada', f:{ bateria:6, tela:1.4 } },
+  { v:'antigo', t:'Aparelho com mais de 3 anos de uso', f:{ bateria:1.8, conector:1.2 } },
+  { v:'carregador_ruim', t:'Usava carregador barato ou sem marca', f:{ ic_carga:1.8, cabo:1.5, bateria:1.3 } }
+];
+const TRI_PLATAFORMA_F = {
+  iphone:  { backlight:1.3, ic_carga:1.3, cpu_mem:1.1 },
+  android: { software:1.2, bateria:1.1 },
+  outro:   {}
+};
+
+/* Identifica o modo USB pelo vendorId/productId (valores em número). */
+const TRI_USB_MODOS = [
+  { vid:0x05ac, pid:0x1227, modo:'DFU (Apple)', gr:'especial', info:'A placa do iPhone está viva e aceita recuperação. Restaurar pelo modo DFU costuma resolver falha de software; se a restauração falhar sempre, aponta para hardware.' },
+  { vid:0x05ac, pid:0x1281, modo:'Recovery (Apple)', gr:'especial', info:'O iPhone está vivo e em modo de recuperação. Restaure o sistema; erros repetidos de restauração indicam problema de hardware.' },
+  { vid:0x05ac, pid:0x1280, modo:'Recovery (Apple)', gr:'especial', info:'O aparelho está em modo de recuperação (iBoot).' },
+  { vid:0x05c6, pid:0x9008, modo:'EDL (Qualcomm)', gr:'especial', info:'O processador Qualcomm está vivo e em modo de emergência: indica falha de boot/armazenamento ou software, não falta total de energia.' },
+  { vid:0x0e8d, pid:0x0003, modo:'Preloader / BROM (MediaTek)', gr:'especial', info:'O processador MediaTek está vivo. A falha tende a ser software/armazenamento.' },
+  { vid:0x0e8d, pid:0x2000, modo:'Preloader (MediaTek)', gr:'especial', info:'O processador MediaTek está vivo. A falha tende a ser software/armazenamento.' },
+  { vid:0x04e8, pid:0x685d, modo:'Download / Odin (Samsung)', gr:'especial', info:'O aparelho Samsung está vivo em modo de download; o firmware pode ser regravado.' },
+  { vid:0x18d1, pid:0x4ee0, modo:'Fastboot (Android)', gr:'especial', info:'O aparelho está vivo em modo bootloader/fastboot.' },
+  { vid:0x1782, pid:0x4d00, modo:'Download (Spreadtrum/Unisoc)', gr:'especial', info:'O processador está vivo em modo de download.' },
+  { vid:0x05ac, pid:null, modo:'Apple (modo normal)', gr:'normal', info:'O iPhone/iPad é reconhecido pelo computador: a placa está viva. Foque na tela, no backlight e no software.' }
+];
+const TRI_USB_FABRICANTES = { 0x04e8:'Samsung', 0x22b8:'Motorola', 0x2717:'Xiaomi', 0x18d1:'Google/Android', 0x12d1:'Huawei', 0x2a70:'OnePlus', 0x22d9:'Oppo', 0x0bb4:'HTC', 0x0fce:'Sony', 0x1004:'LG', 0x05c6:'Qualcomm', 0x0e8d:'MediaTek', 0x05ac:'Apple', 0x2d95:'Vivo', 0x1782:'Unisoc' };
+function triIdentificarUsb(vid, pid){
+  for(let i = 0; i < TRI_USB_MODOS.length; i++){
+    const m = TRI_USB_MODOS[i];
+    if(m.vid === vid && (m.pid === null || m.pid === pid)) return { modo: m.modo, gr: m.gr, info: m.info, fab: TRI_USB_FABRICANTES[vid] || ('fabricante 0x' + vid.toString(16)) };
+  }
+  return { modo: 'Modo normal', gr: 'normal', fab: TRI_USB_FABRICANTES[vid] || ('fabricante 0x' + vid.toString(16)), info: 'O aparelho é reconhecido pelo computador: a placa está viva. Foque na tela, no backlight e no software.' };
+}
+
+/* Calcula o resultado a partir das respostas.
+   in: { plataforma, respostas:{id:valor}, historico:[...], ciclos, saude } */
+function triCalcular(inp){
+  const peso = {};
+  TRI_CAUSAS_ORDEM.forEach(function(c){ peso[c] = TRI_PRIOR[c]; });
+  const aplicar = function(f, forca){
+    if(!f) return;
+    Object.keys(f).forEach(function(c){ peso[c] *= Math.pow(f[c], (forca || 1) * 0.6); });
+  };
+  const respostas = inp.respostas || {};
+  let respondidas = 0;
+  TRI_PERGUNTAS.forEach(function(q){
+    const v = respostas[q.id];
+    if(!v) return;
+    const o = q.opcoes.filter(function(x){ return x.v === v; })[0];
+    if(o){ aplicar(o.f); respondidas++; }
+  });
+  (inp.historico || []).forEach(function(v){
+    const o = TRI_HISTORICO.filter(function(x){ return x.v === v; })[0];
+    if(o) aplicar(o.f, 0.8);
+  });
+  aplicar(TRI_PLATAFORMA_F[inp.plataforma || 'outro']);
+  // Bateria: saúde e ciclos informados
+  const saude = inp.saude !== '' && inp.saude != null ? Number(inp.saude) : null;
+  const ciclos = inp.ciclos !== '' && inp.ciclos != null ? Number(inp.ciclos) : null;
+  if(saude != null && !isNaN(saude)){
+    if(saude < 70) aplicar({ bateria:2.2 }); else if(saude < 80) aplicar({ bateria:1.6 }); else if(saude >= 90) aplicar({ bateria:0.7 });
+  }
+  if(ciclos != null && !isNaN(ciclos)){
+    if(ciclos > 1000) aplicar({ bateria:1.9 }); else if(ciclos > 800) aplicar({ bateria:1.5 }); else if(ciclos < 300) aplicar({ bateria:0.8 });
+  }
+  let soma = 0;
+  TRI_CAUSAS_ORDEM.forEach(function(c){ soma += peso[c]; });
+  // Suaviza: sintomas se correlacionam e nenhuma causa é 100% descartável por perguntas
+  const n = TRI_CAUSAS_ORDEM.length;
+  const causas = TRI_CAUSAS_ORDEM.map(function(c){
+    const p = (0.92 * (peso[c] / soma) + 0.08 / n) * 100;
+    return { id: c, nome: TRI_CAUSAS[c].nome, area: TRI_CAUSAS[c].area, pct: Math.round(p * 10) / 10 };
+  }).sort(function(a, b){ return b.pct - a.pct; });
+  const areas = {};
+  Object.keys(TRI_AREAS).forEach(function(a){ areas[a] = 0; });
+  causas.forEach(function(c){ areas[c.area] += c.pct; });
+  Object.keys(areas).forEach(function(a){ areas[a] = Math.round(areas[a] * 10) / 10; });
+  const placa = areas.placa;
+  let placaNivel = 'baixa';
+  if(placa >= 50) placaNivel = 'alta'; else if(placa >= 28) placaNivel = 'moderada';
+  const margem = causas.length > 1 ? causas[0].pct - causas[1].pct : causas[0].pct;
+  let confianca = 'baixa';
+  if(respondidas >= 4 && causas[0].pct >= 35 && margem >= 12) confianca = 'alta';
+  else if(respondidas >= 3 && causas[0].pct >= 25) confianca = 'media';
+  return { causas: causas, areas: areas, placa: placa, placaNivel: placaNivel, confianca: confianca, respondidas: respondidas, total: TRI_PERGUNTAS.length, margem: Math.round(margem * 10) / 10 };
+}
+function triResumoTexto(res){
+  if(!res.respondidas) return 'Triagem sem respostas.';
+  const c = res.causas;
+  const nivelP = { baixa:'baixa', moderada:'moderada', alta:'alta' }[res.placaNivel];
+  const conf = { baixa:'baixa', media:'média', alta:'alta' }[res.confianca];
+  return 'Causa mais provável: ' + c[0].nome + ' (' + c[0].pct.toFixed(0) + '%). Em seguida: ' + c[1].nome + ' (' + c[1].pct.toFixed(0) + '%) e ' + c[2].nome + ' (' + c[2].pct.toFixed(0) + '%).\n' +
+    'Suspeita de defeito na placa: ' + nivelP + ' (' + res.placa.toFixed(0) + '%). Confiança da estimativa: ' + conf + '.';
+}
+
+/* ===== TRIAGEM DE DEFEITO: tela e painel ===== */
+let triS = null;
+function triEstadoNovo(){
+  return { plataforma:'iphone', marca:'', modelo:'', respostas:{}, historico:[], ciclos:'', saude:'', usb:null, obs:'', clienteId:'', osId:'', aberto:null, feitos:{} };
+}
+function triInputs(s){
+  return { plataforma:s.plataforma, respostas:s.respostas, historico:s.historico, ciclos:s.ciclos, saude:s.saude };
+}
+function triEnsureCss(){
+  if(document.getElementById('triCss')) return;
+  const st = document.createElement('style');
+  st.id = 'triCss';
+  st.textContent =
+    '.tri-wrap{display:grid;grid-template-columns:minmax(300px,380px) 1fr;gap:18px;align-items:start;}' +
+    '@media(max-width:1000px){.tri-wrap{grid-template-columns:1fr;}}' +
+    '.tri-sec{margin-bottom:16px;}' +
+    '.tri-sec h4{margin:0 0 8px;font-size:13px;}' +
+    '.tri-chips{display:flex;flex-wrap:wrap;gap:6px;}' +
+    '.tri-chip{border:1px solid var(--gridline,#e1e0d9);background:#fff;border-radius:100px;padding:6px 11px;font-size:12.5px;cursor:pointer;color:var(--text-primary,#0b0b0b);font-family:inherit;text-align:left;}' +
+    '.tri-chip:hover{border-color:#2a78d6;}' +
+    '.tri-chip.on{background:#2a78d6;border-color:#2a78d6;color:#fff;font-weight:600;}' +
+    '.tri-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px;}' +
+    '.tri-kpi{border:1px solid var(--gridline,#e1e0d9);border-radius:12px;padding:12px 14px;background:#fff;display:flex;flex-direction:column;justify-content:space-between;min-height:96px;}' +
+    '.tri-kpi .l{font-size:11.5px;color:var(--text-secondary,#52514e);text-transform:uppercase;letter-spacing:.03em;}' +
+    '.tri-kpi .v{font-size:19px;font-weight:700;margin-top:4px;line-height:1.2;}' +
+    '.tri-kpi .s{font-size:12px;color:var(--text-secondary,#52514e);margin-top:2px;}' +
+    '.tri-grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-bottom:14px;}' +
+    '.tri-card{border:1px solid var(--gridline,#e1e0d9);border-radius:12px;padding:14px 16px;background:#fff;}' +
+    '.tri-card h4{margin:0;font-size:14px;}' +
+    '.tri-card .sub{font-size:12px;color:var(--text-secondary,#52514e);margin:2px 0 10px;}' +
+    '.tri-row{display:grid;grid-template-columns:minmax(120px,38%) 1fr 46px;gap:8px;align-items:center;width:100%;border:0;background:none;padding:6px 4px;cursor:pointer;font-family:inherit;border-radius:8px;text-align:left;}' +
+    '.tri-row:hover,.tri-row.aberto{background:#eef4fc;}' +
+    '.tri-rn{font-size:12.5px;color:var(--text-primary,#0b0b0b);}' +
+    '.tri-track{height:10px;background:#eeeeec;border-radius:0 6px 6px 0;overflow:hidden;display:block;}' +
+    '.tri-track i{display:block;height:100%;border-radius:0 4px 4px 0;transition:width .45s;}' +
+    '.tri-rv{font-size:12.5px;font-weight:700;text-align:right;color:var(--text-primary,#0b0b0b);}' +
+    '.tri-det{margin:2px 4px 8px;padding:10px 12px;border-radius:8px;background:#f7f8f7;font-size:12.5px;line-height:1.5;}' +
+    '.tri-det ol{margin:6px 0 0 18px;padding:0;}' +
+    '.tri-anel{width:96px;height:96px;flex-shrink:0;}' +
+    '.tri-anel-n{font-size:22px;font-weight:800;fill:var(--text-primary,#0b0b0b);}' +
+    '.tri-flex{display:flex;gap:14px;align-items:center;}' +
+    '.tri-tag{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:100px;background:#eeeeec;color:var(--text-primary,#0b0b0b);}' +
+    '.tri-ciclos{position:relative;height:12px;background:#eeeeec;border-radius:6px;margin:14px 0 20px;}' +
+    '.tri-ciclos i{display:block;height:100%;border-radius:6px;transition:width .45s;}' +
+    '.tri-ciclos b{position:absolute;top:14px;font-size:10.5px;font-weight:400;color:var(--text-secondary,#52514e);transform:translateX(-50%);}' +
+    '.tri-ciclos u{position:absolute;top:-3px;bottom:-3px;width:2px;background:#898781;opacity:.6;text-decoration:none;}' +
+    '.tri-pass{display:flex;gap:8px;align-items:flex-start;padding:5px 0;font-size:13px;line-height:1.45;}' +
+    '.tri-pass input{margin-top:3px;}' +
+    '.tri-pass.feito span{text-decoration:line-through;color:var(--text-secondary,#52514e);}' +
+    '.tri-vazio{border:1px dashed var(--gridline,#e1e0d9);border-radius:12px;padding:28px 18px;text-align:center;color:var(--text-secondary,#52514e);font-size:13.5px;margin-bottom:14px;background:#fff;}' +
+    '.tri-nota{font-size:11.5px;color:var(--text-secondary,#52514e);line-height:1.5;margin-top:6px;}';
+  document.head.appendChild(st);
+}
+const TRI_NIVEL = {
+  baixa:    { cor:'#0ca30c', ico:'✓', txt:'Baixa' },
+  moderada: { cor:'#c98a00', ico:'!', txt:'Moderada' },
+  alta:     { cor:'#d03b3b', ico:'✕', txt:'Alta' }
+};
+function triAnel(pct, cor, rotulo, texto){
+  const r = 38, c = 2 * Math.PI * r;
+  const v = Math.max(0, Math.min(100, pct));
+  return '<svg viewBox="0 0 100 100" class="tri-anel" role="img" aria-label="' + escapeHtml(rotulo) + '">' +
+    '<circle cx="50" cy="50" r="38" fill="none" stroke="#eeeeec" stroke-width="9"></circle>' +
+    '<circle cx="50" cy="50" r="38" fill="none" stroke="' + cor + '" stroke-width="9" stroke-linecap="round" stroke-dasharray="' + c.toFixed(1) + '" stroke-dashoffset="' + (c * (1 - v / 100)).toFixed(1) + '" transform="rotate(-90 50 50)" style="transition:stroke-dashoffset .5s"></circle>' +
+    '<text x="50" y="57" text-anchor="middle" class="tri-anel-n">' + escapeHtml(texto) + '</text></svg>';
+}
+function triRotuloResposta(qid, v){
+  const q = TRI_PERGUNTAS.filter(function(x){ return x.id === qid; })[0];
+  if(!q) return v;
+  const o = q.opcoes.filter(function(x){ return x.v === v; })[0];
+  return o ? o.t : v;
+}
+function triBateriaHtml(s){
+  const sa = s.saude !== '' && s.saude != null ? Number(s.saude) : null;
+  const ci = s.ciclos !== '' && s.ciclos != null ? Number(s.ciclos) : null;
+  let h = '<div class="tri-card"><h4>Bateria</h4><div class="sub">Saúde e ciclos de carga informados</div>';
+  if((sa == null || isNaN(sa)) && (ci == null || isNaN(ci))){
+    return h + '<div class="tri-nota" style="margin:0;">Nenhum dado informado. Se o aparelho ainda responde, preencha a saúde e os ciclos de carga (no iPhone, em Ajustes &gt; Bateria). Para Android, use a leitura por USB. Se não liga, deixe em branco.</div></div>';
+  }
+  h += '<div class="tri-flex">';
+  if(sa != null && !isNaN(sa)){
+    let cor = '#0ca30c', rot = 'Boa';
+    if(sa < 70){ cor = '#d03b3b'; rot = 'Trocar'; } else if(sa < 80){ cor = '#c98a00'; rot = 'Desgastada'; }
+    h += triAnel(sa, cor, 'Saúde da bateria ' + sa + '%', sa + '%') + '<div><div style="font-size:12px;color:var(--text-secondary,#52514e);">Saúde da bateria</div><div style="font-size:18px;font-weight:700;">' + (sa >= 80 ? '✓ ' : (sa >= 70 ? '! ' : '✕ ')) + rot + '</div></div>';
+  }
+  h += '</div>';
+  if(ci != null && !isNaN(ci)){
+    const max = 1200, pct = Math.min(100, ci / max * 100);
+    let cor = '#0ca30c', rot = 'Poucos ciclos';
+    if(ci > 800){ cor = '#d03b3b'; rot = 'Muitos ciclos'; } else if(ci >= 500){ cor = '#c98a00'; rot = 'Ciclos médios'; }
+    h += '<div style="margin-top:12px;font-size:13px;"><b>' + ci + ' ciclos</b> · ' + (ci > 800 ? '✕ ' : (ci >= 500 ? '! ' : '✓ ')) + rot + '</div>' +
+      '<div class="tri-ciclos"><i style="width:' + pct.toFixed(1) + '%;background:' + cor + ';"></i>' +
+      '<u style="left:' + (500 / max * 100).toFixed(1) + '%"></u><b style="left:' + (500 / max * 100).toFixed(1) + '%">500</b>' +
+      '<u style="left:' + (800 / max * 100).toFixed(1) + '%"></u><b style="left:' + (800 / max * 100).toFixed(1) + '%">800</b>' +
+      '<b style="left:100%;transform:translateX(-100%);">1200</b></div>';
+  }
+  return h + '</div>';
+}
+function triPassosLista(res, s, editavel){
+  const top = res.causas.filter(function(c, i){ return i < 3 && c.pct >= 10; });
+  if(!top.length) return '';
+  let h = '<div class="tri-card"><h4>O que fazer, nesta ordem</h4><div class="sub">Passos para confirmar as causas mais prováveis' + (editavel ? ' (marque conforme for fazendo)' : '') + '</div>';
+  top.forEach(function(c){
+    h += '<div style="margin-top:8px;font-size:12.5px;font-weight:700;">' + escapeHtml(c.nome) + ' · ' + c.pct.toFixed(0) + '%</div>';
+    TRI_CAUSAS[c.id].passos.forEach(function(p, i){
+      const key = c.id + '_' + i;
+      const feito = !!(s.feitos && s.feitos[key]);
+      h += '<label class="tri-pass' + (feito ? ' feito' : '') + '">' + (editavel ? '<input type="checkbox" data-tri-feito="' + key + '"' + (feito ? ' checked' : '') + '>' : '<span>•</span>') + '<span>' + escapeHtml(p) + '</span></label>';
+    });
+  });
+  return h + '</div>';
+}
+function triDashHtml(res, s, editavel){
+  let h = '';
+  if(!res.respondidas){
+    h += '<div class="tri-vazio"><div style="font-size:30px;">&#128269;</div>Responda as perguntas ao lado. O painel mostra a causa mais provável, a suspeita de defeito na placa e os próximos testes, e atualiza a cada resposta.</div>';
+    return h + '<div class="tri-grid2">' + triBateriaHtml(s) + '</div>';
+  }
+  const top = res.causas[0];
+  const nv = TRI_NIVEL[res.placaNivel];
+  const confTxt = { baixa:'Baixa', media:'Média', alta:'Alta' }[res.confianca];
+  const confPts = { baixa:1, media:2, alta:3 }[res.confianca];
+  const usbTxt = s.usb ? (s.usb.modo || '—') : '—';
+  h += '<div class="tri-kpis">' +
+    '<div class="tri-kpi" title="Causa com a maior probabilidade estimada pelos sintomas"><span class="l">Causa mais provável</span><span class="v">' + escapeHtml(top.nome) + '</span><span class="s">' + top.pct.toFixed(0) + '% de probabilidade</span></div>' +
+    '<div class="tri-kpi" title="Soma da probabilidade das causas que estão na placa (IC de carga, curto, CPU/memória, oxidação)"><span class="l">Suspeita de defeito na placa</span><span class="v" style="color:' + nv.cor + ';">' + nv.ico + ' ' + nv.txt + '</span><span class="s">' + res.placa.toFixed(0) + '% das causas</span></div>' +
+    '<div class="tri-kpi" title="Quanto as respostas permitem separar a causa principal das demais"><span class="l">Confiança</span><span class="v">' + confTxt + '</span><span class="s">' + '●'.repeat(confPts) + '○'.repeat(3 - confPts) + ' · ' + res.respondidas + ' de ' + res.total + ' perguntas</span></div>' +
+    '<div class="tri-kpi" title="Como o computador enxergou o aparelho pelo USB"><span class="l">Aparelho no USB</span><span class="v" style="font-size:' + (usbTxt.length > 16 ? '14' : '19') + 'px;">' + escapeHtml(usbTxt) + '</span><span class="s">' + (s.usb ? escapeHtml(s.usb.fab || '') : 'ainda não verificado') + '</span></div>' +
+    '</div>';
+  // Ranking de causas
+  const maxPct = res.causas[0].pct || 1;
+  let rk = '';
+  res.causas.forEach(function(c, i){
+    const aberto = s.aberto === c.id;
+    const info = TRI_CAUSAS[c.id];
+    rk += '<button type="button" class="tri-row' + (aberto ? ' aberto' : '') + '" data-tri-causa="' + c.id + '" aria-expanded="' + aberto + '" title="' + escapeHtml(info.nome + ': ' + c.pct.toFixed(1) + '%. ' + info.desc) + '">' +
+      '<span class="tri-rn">' + escapeHtml(c.nome) + '</span>' +
+      '<span class="tri-track"><i style="width:' + (c.pct / maxPct * 100).toFixed(1) + '%;background:' + (i === 0 ? '#2a78d6' : '#9cc0ee') + ';"></i></span>' +
+      '<span class="tri-rv">' + c.pct.toFixed(0) + '%</span></button>';
+    if(aberto){
+      rk += '<div class="tri-det"><b>' + escapeHtml(info.nome) + '</b>: ' + escapeHtml(info.desc) + '<ol>' + info.passos.map(function(p){ return '<li>' + escapeHtml(p) + '</li>'; }).join('') + '</ol></div>';
+    }
+  });
+  // Áreas
+  let ar = '';
+  Object.keys(TRI_AREAS).map(function(a){ return { id:a, pct:res.areas[a] }; }).sort(function(a, b){ return b.pct - a.pct; }).forEach(function(a){
+    const causasArea = res.causas.filter(function(c){ return c.area === a.id; }).map(function(c){ return c.nome + ' ' + c.pct.toFixed(0) + '%'; }).join(', ');
+    ar += '<div class="tri-row" style="cursor:default;" title="' + escapeHtml(causasArea) + '"><span class="tri-rn">' + escapeHtml(TRI_AREAS[a.id]) + '</span>' +
+      '<span class="tri-track"><i style="width:' + Math.min(100, a.pct).toFixed(1) + '%;background:#2a78d6;"></i></span><span class="tri-rv">' + a.pct.toFixed(0) + '%</span></div>';
+  });
+  h += '<div class="tri-grid2">' +
+    '<div class="tri-card"><h4>Causas prováveis</h4><div class="sub">Probabilidade estimada pelos sintomas. A barra é proporcional à maior. Clique para ver o que testar.</div>' + rk + '</div>' +
+    '<div>' +
+      '<div class="tri-card" style="margin-bottom:14px;"><h4>Defeito na placa?</h4><div class="sub">Peso das causas que exigem reparo de placa</div>' +
+        '<div class="tri-flex">' + triAnel(res.placa, nv.cor, 'Suspeita de placa ' + res.placa.toFixed(0) + '%', res.placa.toFixed(0) + '%') +
+        '<div style="font-size:13px;line-height:1.5;"><b style="color:' + nv.cor + ';">' + nv.ico + ' Suspeita ' + nv.txt.toLowerCase() + '</b><br>' +
+        (res.placaNivel === 'alta' ? 'Os sintomas apontam para curto, IC de carga ou dano na placa. Confirme com medições antes de orçar.' : (res.placaNivel === 'moderada' ? 'Há indícios de problema na placa, mas ainda é preciso medir para confirmar.' : 'As causas mais prováveis estão fora da placa (peças que se trocam).')) + '</div></div></div>' +
+      '<div class="tri-card"><h4>Onde está o problema</h4><div class="sub">Soma por área do aparelho</div>' + ar + '</div>' +
+    '</div></div>';
+  h += '<div class="tri-grid2">' + triBateriaHtml(s) + triPassosLista(res, s, editavel) + '</div>';
+  h += '<div class="tri-nota">Estimativa por sintomas, como apoio à decisão: não substitui medição na bancada. A confiança sobe quando mais perguntas são respondidas e quando os dados do USB e da bateria são informados.</div>';
+  return h;
+}
+
+/* ---- tela de triagem ---- */
+async function diagTriagemAbrir(){
+  triEnsureCss();
+  if(!state.cache.clientes) state.cache.clientes = await sbSelect('clientes');
+  if(!state.cache.os) state.cache.os = await sbSelect('ordens_servico');
+  triS = triEstadoNovo();
+  const chips = function(qid, ops, ativo){
+    return '<div class="tri-chips">' + ops.map(function(o){ return '<button type="button" class="tri-chip" data-q="' + qid + '" data-v="' + o.v + '">' + escapeHtml(o.t) + '</button>'; }).join('') + '</div>';
+  };
+  let q = '';
+  TRI_PERGUNTAS.forEach(function(p, i){ q += '<div class="tri-sec"><h4>' + (i + 1) + '. ' + escapeHtml(p.titulo) + '</h4>' + chips(p.id, p.opcoes) + '</div>'; });
+  const opCli = '<option value="">— sem cliente —</option>' + state.cache.clientes.map(function(c){ return '<option value="' + c.id + '">' + escapeHtml(c.nome) + '</option>'; }).join('');
+  const opOs = '<option value="">— sem OS —</option>' + state.cache.os.slice(0, 150).map(function(o){ return '<option value="' + o.id + '">#' + escapeHtml(o.numero) + ' · ' + escapeHtml([o.marca, o.modelo].filter(Boolean).join(' ') || 'aparelho') + '</option>'; }).join('');
+  document.getElementById('content').innerHTML =
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;"><button class="btn btn-secondary" id="triVoltar">&larr; Voltar</button><div><b style="font-size:16px;">Triagem de defeito: aparelho que não liga</b><div class="hint" style="margin:0;">Responda o que você observa. O painel calcula as causas mais prováveis na hora.</div></div></div>' +
+    '<div class="tri-wrap"><div class="card" id="triForm">' +
+      '<div class="tri-sec"><h4>Aparelho</h4><div class="tri-chips" id="triPlat">' +
+        '<button type="button" class="tri-chip on" data-plat="iphone">iPhone / iPad (iOS)</button><button type="button" class="tri-chip" data-plat="android">Android</button><button type="button" class="tri-chip" data-plat="outro">Outro</button></div>' +
+        '<div class="row-flex" style="margin-top:8px;"><input id="triMarca" placeholder="Marca (opcional)"><input id="triModelo" placeholder="Modelo (opcional)"></div></div>' +
+      '<div class="tri-sec"><h4>Detectar pelo USB</h4><button class="btn btn-secondary" id="triUsb" style="width:100%;">&#128268; Detectar aparelho no USB</button>' +
+        '<div class="tri-nota" id="triUsbMsg">Plugue o aparelho e escolha-o na janela. Se ele não aparecer na lista, marque "Não aparece nada" na pergunta 4.</div></div>' +
+      q +
+      '<div class="tri-sec"><h4>8. Histórico (marque o que se aplica)</h4><div class="tri-chips">' + TRI_HISTORICO.map(function(o){ return '<button type="button" class="tri-chip" data-h="' + o.v + '">' + escapeHtml(o.t) + '</button>'; }).join('') + '</div></div>' +
+      '<div class="tri-sec"><h4>9. Bateria (se souber)</h4><div class="row-flex"><div class="field"><label>Saúde (%)</label><input id="triSaude" type="number" min="0" max="100" placeholder="ex.: 82"></div><div class="field"><label>Ciclos de carga</label><input id="triCiclos" type="number" min="0" placeholder="ex.: 540"></div></div></div>' +
+      '<div class="tri-sec"><h4>Observações</h4><textarea id="triObs" rows="2" style="width:100%;" placeholder="Ex.: cliente disse que caiu da mesa ontem..."></textarea></div>' +
+      '<div class="tri-sec"><h4>Vincular (opcional)</h4><div class="field"><label>Cliente</label><select id="triCli">' + opCli + '</select></div><div class="field"><label>Ordem de serviço</label><select id="triOs">' + opOs + '</select></div></div>' +
+      '<div class="row-flex"><button class="btn btn-secondary" id="triLimpa">Limpar tudo</button><button class="btn btn-primary" id="triSalvar">Salvar triagem</button></div>' +
+    '</div><div id="triDash"></div></div>';
+  triAtualizar();
+  document.getElementById('triVoltar').onclick = function(){ triS = null; renderDiagnostico(); };
+  const form = document.getElementById('triForm');
+  form.addEventListener('click', function(e){
+    const b = e.target.closest ? e.target.closest('button') : null;
+    if(!b) return;
+    if(b.dataset.q){
+      const qid = b.dataset.q, v = b.dataset.v;
+      if(triS.respostas[qid] === v) delete triS.respostas[qid]; else triS.respostas[qid] = v;
+      triAtualizar();
+    }else if(b.dataset.h){
+      const i = triS.historico.indexOf(b.dataset.h);
+      if(i >= 0) triS.historico.splice(i, 1); else triS.historico.push(b.dataset.h);
+      triAtualizar();
+    }else if(b.dataset.plat){
+      triS.plataforma = b.dataset.plat;
+      triAtualizar();
+    }
+  });
+  document.getElementById('triMarca').oninput = function(){ triS.marca = this.value; };
+  document.getElementById('triModelo').oninput = function(){ triS.modelo = this.value; };
+  document.getElementById('triSaude').oninput = function(){ triS.saude = this.value; triAtualizar(true); };
+  document.getElementById('triCiclos').oninput = function(){ triS.ciclos = this.value; triAtualizar(true); };
+  document.getElementById('triObs').oninput = function(){ triS.obs = this.value; };
+  document.getElementById('triCli').onchange = function(){ triS.clienteId = this.value; };
+  document.getElementById('triOs').onchange = function(){ triS.osId = this.value; };
+  document.getElementById('triUsb').onclick = triDetectarUsb;
+  document.getElementById('triLimpa').onclick = function(){ if(confirm('Limpar todas as respostas?')) diagTriagemAbrir(); };
+  document.getElementById('triSalvar').onclick = triSalvar;
+  const dash = document.getElementById('triDash');
+  dash.addEventListener('click', function(e){
+    const r = e.target.closest ? e.target.closest('[data-tri-causa]') : null;
+    if(r){ triS.aberto = triS.aberto === r.dataset.triCausa ? null : r.dataset.triCausa; triAtualizar(true); }
+  });
+  dash.addEventListener('change', function(e){
+    const k = e.target && e.target.dataset ? e.target.dataset.triFeito : null;
+    if(k){ triS.feitos[k] = e.target.checked; triAtualizar(true); }
+  });
+}
+function triAtualizar(soDash){
+  if(!triS) return;
+  const res = triCalcular(triInputs(triS));
+  document.getElementById('triDash').innerHTML = triDashHtml(res, triS, true);
+  if(soDash === true) return;
+  document.querySelectorAll('#triForm [data-q]').forEach(function(b){ b.classList.toggle('on', triS.respostas[b.dataset.q] === b.dataset.v); });
+  document.querySelectorAll('#triForm [data-h]').forEach(function(b){ b.classList.toggle('on', triS.historico.indexOf(b.dataset.h) >= 0); });
+  document.querySelectorAll('#triPlat [data-plat]').forEach(function(b){ b.classList.toggle('on', triS.plataforma === b.dataset.plat); });
+}
+async function triDetectarUsb(){
+  const msg = document.getElementById('triUsbMsg');
+  if(!navigator.usb){ msg.textContent = 'Este navegador não lê USB. Abra o sistema no Chrome ou Edge, no computador.'; return; }
+  let dev = null;
+  try{ dev = await navigator.usb.requestDevice({ filters: [] }); }
+  catch(e){
+    msg.textContent = 'Nenhum aparelho foi escolhido. Se ele não apareceu na lista, o computador não o está enxergando: marque "Não aparece nada" na pergunta 4. Antes, teste outro cabo e outra porta USB.';
+    return;
+  }
+  const info = triIdentificarUsb(dev.vendorId, dev.productId);
+  triS.usb = { modo: info.modo, fab: info.fab, vid: dev.vendorId, pid: dev.productId, nome: dev.productName || '', info: info.info };
+  triS.respostas.usb = info.gr === 'especial' ? 'especial' : 'normal';
+  if(dev.vendorId === 0x05ac && triS.plataforma !== 'iphone') triS.plataforma = 'iphone';
+  msg.innerHTML = '<b>Detectado:</b> ' + escapeHtml(dev.productName || info.fab) + ' · ' + escapeHtml(info.modo) + ' (' + dev.vendorId.toString(16).padStart(4, '0') + ':' + dev.productId.toString(16).padStart(4, '0') + ')<br>' + escapeHtml(info.info);
+  triAtualizar();
+}
+function triMontarDados(s){
+  const res = triCalcular(triInputs(s));
+  const campos = [];
+  const add = function(k, v){ if(v !== null && v !== undefined && v !== '') campos.push({ k: k, v: String(v) }); };
+  add('Plataforma', { iphone:'iPhone / iPad (iOS)', android:'Android', outro:'Outro' }[s.plataforma]);
+  add('Marca', s.marca); add('Modelo', s.modelo);
+  TRI_PERGUNTAS.forEach(function(p){ if(s.respostas[p.id]) add(p.titulo, triRotuloResposta(p.id, s.respostas[p.id])); });
+  if(s.historico.length) add('Histórico', s.historico.map(function(v){ return TRI_HISTORICO.filter(function(h){ return h.v === v; })[0].t; }).join('; '));
+  add('Saúde da bateria', s.saude !== '' ? s.saude + '%' : ''); add('Ciclos de carga', s.ciclos);
+  if(s.usb) add('USB', s.usb.modo + ' (' + s.usb.fab + ')');
+  return {
+    dados: {
+      tipo_registro: 'triagem', plataforma: s.plataforma === 'iphone' ? 'ios' : s.plataforma, tipo: 'celular',
+      marca: s.marca, modelo: s.modelo, plat_triagem: s.plataforma, respostas: s.respostas, historico: s.historico,
+      ciclos: s.ciclos, saude: s.saude, usb: s.usb, observacoes: s.obs,
+      causas: res.causas.map(function(c){ return { id:c.id, nome:c.nome, pct:c.pct }; }), areas: res.areas,
+      placa: res.placa, placaNivel: res.placaNivel, confianca: res.confianca, respondidas: res.respondidas,
+      campos: campos, coletado_em: new Date().toISOString()
+    },
+    resumo: triResumoTexto(res), res: res
+  };
+}
+async function triSalvar(){
+  if(!triS) return;
+  if(!Object.keys(triS.respostas).length){ toast('Responda ao menos uma pergunta antes de salvar', 'err'); return; }
+  const m = triMontarDados(triS);
+  const btn = document.getElementById('triSalvar');
+  btn.disabled = true;
+  const { data, error } = await sb.from('diagnosticos').insert({
+    origem: 'triagem', plataforma: m.dados.plataforma, categoria: 'celular', marca: triS.marca || null, modelo: triS.modelo || null,
+    cliente_id: triS.clienteId || null, os_id: triS.osId || null, status: 'concluido', dados: m.dados, testes: [], resumo: m.resumo
+  }).select().single();
+  btn.disabled = false;
+  if(error || !data){ toast('Erro ao salvar: ' + (error ? error.message : ''), 'err'); return; }
+  toast('Triagem salva', 'ok');
+  triS = null;
+  await renderDiagnostico();
+  diagVerLaudo(data.id);
+}
+
+/* ---- laudo da triagem ---- */
+function diagOrigemTxt(d){
+  return d.origem === 'usb' ? 'Leitura por USB' : (d.origem === 'triagem' ? 'Triagem de defeito' : 'Teste no aparelho');
+}
+function diagTriagemPilula(d){
+  const x = d.dados || {};
+  if(!x.causas || !x.causas.length) return '<span class="hint">sem resultado</span>';
+  const cls = { baixa:'badge-good', moderada:'badge-warning', alta:'badge-critical' }[x.placaNivel] || 'badge-muted';
+  return '<span class="badge badge-blue">' + escapeHtml(x.causas[0].nome) + ' ' + Math.round(x.causas[0].pct) + '%</span> <span class="badge ' + cls + '">placa: ' + escapeHtml(x.placaNivel || '—') + '</span>';
+}
+function triEstadoDeDados(x){
+  const s = triEstadoNovo();
+  s.plataforma = x.plat_triagem || 'outro'; s.marca = x.marca || ''; s.modelo = x.modelo || '';
+  s.respostas = x.respostas || {}; s.historico = x.historico || []; s.ciclos = x.ciclos != null ? x.ciclos : ''; s.saude = x.saude != null ? x.saude : '';
+  s.usb = x.usb || null; s.obs = x.observacoes || '';
+  return s;
+}
+function diagTriagemLaudo(d){
+  triEnsureCss();
+  const x = d.dados || {};
+  const s = triEstadoDeDados(x);
+  s.aberto = null;
+  const res = triCalcular(triInputs(s));
+  const campos = (x.campos || []).map(function(c){ return '<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--gridline);font-size:13px;"><span style="color:var(--text-secondary);">' + escapeHtml(c.k) + '</span><strong style="text-align:right;max-width:60%;">' + escapeHtml(c.v) + '</strong></div>'; }).join('');
+  const opCli = '<option value="">— sem cliente —</option>' + state.cache.clientes.map(function(c){ return '<option value="' + c.id + '"' + (c.id === d.cliente_id ? ' selected' : '') + '>' + escapeHtml(c.nome) + '</option>'; }).join('');
+  const opOs = '<option value="">— sem OS —</option>' + state.cache.os.slice(0, 150).map(function(o){ return '<option value="' + o.id + '"' + (o.id === d.os_id ? ' selected' : '') + '>#' + escapeHtml(o.numero) + ' · ' + escapeHtml([o.marca, o.modelo].filter(Boolean).join(' ') || 'aparelho') + '</option>'; }).join('');
+  openModal(
+    '<div class="modal-header"><h3>Triagem #' + String(d.numero).padStart(2, '0') + ' · ' + escapeHtml(diagNome(d)) + '</h3><button class="close-x" onclick="closeModal()">&#10005;</button></div>' +
+    '<div class="modal-body" id="triLaudoBody" style="min-width:min(92vw,860px);">' +
+      '<div style="margin-bottom:12px;"><span class="badge badge-blue">Triagem de defeito</span> <span class="hint">' + fmtDateTime(d.updated_at || d.created_at) + '</span></div>' +
+      '<div id="triLaudoDash">' + triDashHtml(res, s, false) + '</div>' +
+      (campos ? '<div style="font-size:12px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;margin:16px 0 2px;">Respostas</div>' + campos : '') +
+      (x.observacoes ? '<div style="margin-top:14px;font-size:13px;"><b>Observações:</b><div style="white-space:pre-line;">' + escapeHtml(x.observacoes) + '</div></div>' : '') +
+      '<div class="row-flex" style="margin-top:18px;"><div class="field"><label>Cliente</label><select id="diagCli">' + opCli + '</select></div><div class="field"><label>Ordem de serviço</label><select id="diagOs">' + opOs + '</select></div></div>' +
+    '</div>' +
+    '<div class="modal-footer"><button class="btn btn-secondary" id="diagParaOs">Enviar resumo p/ OS</button><button class="btn btn-secondary" id="diagImp">Imprimir</button><button class="btn btn-primary" id="diagSalvaVinculo">Salvar vínculo</button></div>');
+  const box = document.getElementById('triLaudoDash');
+  box.addEventListener('click', function(e){
+    const r = e.target.closest ? e.target.closest('[data-tri-causa]') : null;
+    if(r){ s.aberto = s.aberto === r.dataset.triCausa ? null : r.dataset.triCausa; box.innerHTML = triDashHtml(res, s, false); }
+  });
+  document.getElementById('diagSalvaVinculo').onclick = async function(){
+    const cli = document.getElementById('diagCli').value || null, osId = document.getElementById('diagOs').value || null;
+    const { error } = await sb.from('diagnosticos').update({ cliente_id: cli, os_id: osId, updated_at: new Date().toISOString() }).eq('id', d.id);
+    if(error){ toast('Erro ao salvar: ' + error.message, 'err'); return; }
+    toast('Vínculo salvo', 'ok'); d.cliente_id = cli; d.os_id = osId;
+    if(state.view === 'diagnostico') renderDiagnostico();
+  };
+  document.getElementById('diagImp').onclick = function(){ diagTriagemImprimir(d); };
+  document.getElementById('diagParaOs').onclick = async function(){
+    const osId = document.getElementById('diagOs').value;
+    if(!osId){ toast('Escolha uma ordem de serviço primeiro', 'err'); return; }
+    const { data: od } = await sb.from('ordens_servico').select('id,diagnostico').eq('id', osId).limit(1);
+    const atual = (od && od[0] && od[0].diagnostico) || '';
+    const marca = '[Triagem de defeito #' + String(d.numero).padStart(2, '0');
+    if(atual.indexOf(marca) >= 0){ toast('Essa triagem já foi enviada para a OS', 'err'); return; }
+    const bloco = marca + ' - ' + new Date().toLocaleDateString('pt-BR') + ']\n' + (d.resumo || '');
+    const { error } = await sb.from('ordens_servico').update({ diagnostico: atual ? atual + '\n\n' + bloco : bloco }).eq('id', osId);
+    if(error){ toast('Erro ao enviar para a OS: ' + error.message, 'err'); return; }
+    await sb.from('diagnosticos').update({ os_id: osId, cliente_id: document.getElementById('diagCli').value || null }).eq('id', d.id);
+    toast('Resumo adicionado ao diagnóstico da OS', 'ok');
+  };
+}
+function diagTriagemImprimir(d){
+  const x = d.dados || {};
+  const s = triEstadoDeDados(x);
+  const res = triCalcular(triInputs(s));
+  const nv = TRI_NIVEL[res.placaNivel];
+  const max = res.causas[0].pct || 1;
+  const barras = res.causas.map(function(c){ return '<tr><td style="width:34%">' + escapeHtml(c.nome) + '</td><td><div style="background:#eee;height:10px;"><div style="background:#2a78d6;height:10px;width:' + (c.pct / max * 100).toFixed(1) + '%;"></div></div></td><td style="width:44px;text-align:right;"><b>' + c.pct.toFixed(0) + '%</b></td></tr>'; }).join('');
+  const passos = res.causas.filter(function(c, i){ return i < 3 && c.pct >= 10; }).map(function(c){ return '<div style="margin-top:8px;"><b>' + escapeHtml(c.nome) + ' (' + c.pct.toFixed(0) + '%)</b><ol style="margin:4px 0 0 18px;padding:0;">' + TRI_CAUSAS[c.id].passos.map(function(p){ return '<li>' + escapeHtml(p) + '</li>'; }).join('') + '</ol></div>'; }).join('');
+  const campos = (x.campos || []).map(function(c){ return '<tr><td>' + escapeHtml(c.k) + '</td><td><b>' + escapeHtml(c.v) + '</b></td></tr>'; }).join('');
+  const win = window.open('', '_blank');
+  if(!win){ toast('Libere pop-ups para imprimir', 'err'); return; }
+  win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Triagem ' + String(d.numero).padStart(2, '0') + ' - ' + escapeHtml(diagNome(d)) + ' - UpTECH</title><style>' +
+    'body{font-family:Arial,sans-serif;color:#111;margin:28px;font-size:13px;}h1{font-size:20px;margin:0;}h2{font-size:13px;text-transform:uppercase;color:#555;margin:22px 0 6px;border-bottom:1px solid #ccc;padding-bottom:4px;}table{width:100%;border-collapse:collapse;}td{padding:5px 4px;border-bottom:1px solid #e5e5e5;vertical-align:middle;}.res{background:#eef4fc;padding:10px 12px;border-radius:6px;white-space:pre-line;margin-top:10px;}.top{display:flex;justify-content:space-between;}' +
+    '</style></head><body><div class="top"><div><h1>Triagem de defeito #' + String(d.numero).padStart(2, '0') + '</h1><div>' + escapeHtml(diagNome(d)) + '</div></div><div style="text-align:right;"><b>UP TECH Soluções Tecnológicas</b><br>' + fmtDateTime(d.updated_at || d.created_at) + '</div></div>' +
+    '<div class="res">' + escapeHtml(d.resumo || triResumoTexto(res)) + '</div>' +
+    '<h2>Causas prováveis</h2><table>' + barras + '</table>' +
+    '<p>Suspeita de defeito na placa: <b style="color:' + nv.cor + ';">' + nv.txt + ' (' + res.placa.toFixed(0) + '%)</b></p>' +
+    '<h2>O que fazer, nesta ordem</h2>' + passos +
+    (campos ? '<h2>Respostas</h2><table>' + campos + '</table>' : '') +
+    (x.observacoes ? '<h2>Observações</h2><div style="white-space:pre-line;">' + escapeHtml(x.observacoes) + '</div>' : '') +
+    '<p style="margin-top:30px;color:#666;font-size:11px;">Estimativa por sintomas, como apoio à decisão. Não substitui a medição e a avaliação técnica em bancada.</p>' +
+    '<script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>');
+  win.document.close();
 }
 
 async function navigate(view, force=false){
