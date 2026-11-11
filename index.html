@@ -310,6 +310,7 @@ tbody tr:hover{background:#f9fafb;}
         <div class="navitem" data-view="pdv"><span class="ico">&#128181;</span> Vendas (PDV)</div>
         <div class="navitem" data-view="orcamentos"><span class="ico">&#128203;</span> Orçamentos</div>
         <div class="navitem" data-view="os"><span class="ico">&#128295;</span> Ordens de Serviço</div>
+        <div class="navitem" data-view="diagnostico"><span class="ico">&#128269;</span> Diagnóstico</div>
         <div class="navitem" data-view="checklist"><span class="ico">&#9989;</span> Checklist</div>
         <div class="navitem" data-view="estoque"><span class="ico">&#128230;</span> Estoque</div>
         <div class="navitem" data-view="carcacas"><span class="ico">&#129513;</span> Carcaças</div>
@@ -677,6 +678,7 @@ const VIEW_META = {
   dashboard: {title:'Dashboard', sub:'Visão geral da loja'},
   pdv: {title:'Vendas (PDV)', sub:'Registrar vendas de produtos e acessórios'},
   orcamentos: {title:'Orçamentos', sub:'Monte propostas de venda sem mexer no estoque'},
+  diagnostico: {title:'Diagnóstico de Aparelhos', sub:'Teste e laudo de celulares e tablets'},
   os: {title:'Ordens de Serviço', sub:'Assistência técnica — consertos e diagnósticos'},
   checklist: {title:'Checklist', sub:'Entrada de aparelhos, cadastro rápido de cliente e lucro'},
   estoque: {title:'Estoque', sub:'Produtos, celulares, computadores, acessórios e peças'},
@@ -708,6 +710,572 @@ if(sidebarBackdrop) sidebarBackdrop.addEventListener('click', ()=>{
 });
 document.getElementById('refreshBtn').addEventListener('click', ()=> navigate(state.view, true));
 
+/* ===== DIAGNÓSTICO: leitura de dados do Android (parsers e regras) ===== */
+function diagParseProps(txt){
+  const o = {};
+  String(txt || '').split('\n').forEach(function(l){
+    const m = l.match(/^\[([^\]]+)\]:\s*\[(.*)\]\s*$/);
+    if(m) o[m[1]] = m[2];
+  });
+  return o;
+}
+function diagParseBattery(txt){
+  const o = {};
+  String(txt || '').split('\n').forEach(function(l){
+    const m = l.match(/^\s*([A-Za-z][A-Za-z .]*?):\s*(.+?)\s*$/);
+    if(m) o[m[1].trim().toLowerCase()] = m[2];
+  });
+  const num = function(k){ const v = parseFloat(o[k]); return isNaN(v) ? null : v; };
+  return {
+    nivel: num('level'),
+    saude_cod: num('health'),
+    status_cod: num('status'),
+    temp_c: num('temperature') !== null ? num('temperature') / 10 : null,
+    tensao_mv: num('voltage'),
+    tecnologia: o['technology'] || null,
+    carga_ac: o['ac powered'] === 'true',
+    carga_usb: o['usb powered'] === 'true',
+    carga_sem_fio: o['wireless powered'] === 'true',
+    charge_counter_uah: num('charge counter')
+  };
+}
+const DIAG_BAT_SAUDE = { 1:'Desconhecida', 2:'Boa', 3:'Superaquecida', 4:'Morta', 5:'Sobretensão', 6:'Falha não especificada', 7:'Fria' };
+const DIAG_BAT_STATUS = { 1:'Desconhecido', 2:'Carregando', 3:'Descarregando', 4:'Sem carregar', 5:'Cheia' };
+function diagParseMemTotalKb(txt){
+  const m = String(txt || '').match(/MemTotal:\s*(\d+)\s*kB/i);
+  return m ? parseInt(m[1], 10) : null;
+}
+// Saída de "df -k /data" (o nome do sistema de arquivos pode quebrar linha)
+function diagParseDf(txt){
+  const linhas = String(txt || '').split('\n').filter(function(l){ return l.trim() && !/^Filesystem/i.test(l.trim()); });
+  const toks = linhas.join(' ').trim().split(/\s+/);
+  let i = 0;
+  while(i < toks.length && !/^\d+$/.test(toks[i])) i++;
+  if(i + 2 >= toks.length) return null;
+  const total = parseInt(toks[i], 10), usado = parseInt(toks[i + 1], 10), livre = parseInt(toks[i + 2], 10);
+  if(!total) return null;
+  return { total_kb: total, usado_kb: usado, livre_kb: livre };
+}
+function diagParseWm(txt){
+  const out = {};
+  const s = String(txt || '');
+  let m = s.match(/Physical size:\s*(\d+)x(\d+)/i);
+  if(m){ out.largura = parseInt(m[1], 10); out.altura = parseInt(m[2], 10); }
+  m = s.match(/Physical density:\s*(\d+)/i);
+  if(m) out.densidade = parseInt(m[1], 10);
+  return out;
+}
+function diagIntOrNull(txt){
+  const v = parseInt(String(txt || '').trim(), 10);
+  return isNaN(v) ? null : v;
+}
+function diagGb(kb){ return kb == null ? null : Math.round(kb / 1048576 * 10) / 10; }
+function diagArmazenamentoNominal(kb){
+  // Capacidade comercial aproximada (a partição /data é menor que o chip)
+  const gb = kb / 1048576;
+  const marcos = [16, 32, 64, 128, 256, 512, 1024];
+  for(let i = 0; i < marcos.length; i++){ if(gb <= marcos[i] * 0.97) return marcos[i]; }
+  return Math.round(gb);
+}
+
+/* Junta tudo que foi lido do aparelho em um objeto "dados" */
+function diagMontarDadosAndroid(raw){
+  const p = diagParseProps(raw.getprop);
+  const b = diagParseBattery(raw.battery);
+  const memKb = diagParseMemTotalKb(raw.meminfo);
+  const df = diagParseDf(raw.df);
+  const wm = diagParseWm(raw.wm_size + '\n' + raw.wm_density);
+  const fab = p['ro.product.manufacturer'] || '';
+  const modelo = p['ro.product.model'] || '';
+  const nomeComercial = p['ro.product.marketname'] || p['ro.config.marketing_name'] || p['ro.vendor.product.display'] || '';
+  const cap = diagIntOrNull(raw.charge_full), capProj = diagIntOrNull(raw.charge_full_design), ciclos = diagIntOrNull(raw.cycle_count);
+  let saudePct = null;
+  if(cap && capProj && capProj > 0){
+    // sysfs reporta em µAh na maioria; se vier em mAh os dois valores vêm na mesma unidade e a razão vale igual
+    saudePct = Math.round(cap / capProj * 100);
+    if(saudePct > 130) saudePct = null;
+  }
+  const dados = {
+    plataforma: 'android',
+    tipo: 'celular',
+    marca: fab ? fab.charAt(0).toUpperCase() + fab.slice(1) : '',
+    modelo: nomeComercial || modelo,
+    modelo_codigo: modelo,
+    sistema: p['ro.build.version.release'] ? ('Android ' + p['ro.build.version.release']) : '',
+    api: p['ro.build.version.sdk'] || '',
+    patch_seguranca: p['ro.build.version.security_patch'] || '',
+    serial: p['ro.serialno'] || p['ro.boot.serialno'] || raw.serial || '',
+    cpu: p['ro.hardware'] || p['ro.board.platform'] || '',
+    abi: p['ro.product.cpu.abi'] || '',
+    bootloader_travado: p['ro.boot.flash.locked'] === '1' ? true : (p['ro.boot.flash.locked'] === '0' ? false : null),
+    verified_boot: p['ro.boot.verifiedbootstate'] || '',
+    operadora: p['gsm.operator.alpha'] || '',
+    sim_estado: p['gsm.sim.state'] || '',
+    build: p['ro.build.display.id'] || '',
+    ram_gb_aprox: memKb ? Math.round(memKb / 1048576 * 10) / 10 : null,
+    ram_total_kb: memKb,
+    armazenamento_total_gb: df ? diagArmazenamentoNominal(df.total_kb) : null,
+    armazenamento_livre_gb: df ? diagGb(df.livre_kb) : null,
+    armazenamento_usado_pct: df ? Math.round(df.usado_kb / df.total_kb * 100) : null,
+    tela_px: (wm.largura && wm.altura) ? (wm.largura + 'x' + wm.altura) : '',
+    tela_dpi: wm.densidade || null,
+    bateria_nivel: b.nivel,
+    bateria_saude: DIAG_BAT_SAUDE[b.saude_cod] || (b.saude_cod != null ? String(b.saude_cod) : ''),
+    bateria_saude_cod: b.saude_cod,
+    bateria_estado: DIAG_BAT_STATUS[b.status_cod] || '',
+    bateria_temp_c: b.temp_c,
+    bateria_tensao_mv: b.tensao_mv,
+    bateria_tecnologia: b.tecnologia || '',
+    bateria_ciclos: ciclos,
+    bateria_capacidade_pct: saudePct,
+    leitura_usb: true,
+    coletado_em: new Date().toISOString()
+  };
+  // Lista legível (mesmo formato da página do aparelho)
+  const campos = [];
+  const add = function(k, v){ if(v !== null && v !== undefined && v !== '') campos.push({ k: k, v: String(v) }); };
+  add('Marca', dados.marca); add('Modelo', dados.modelo); add('Código do modelo', dados.modelo_codigo !== dados.modelo ? dados.modelo_codigo : '');
+  add('Sistema', dados.sistema); add('Patch de segurança', dados.patch_seguranca); add('Número de série', dados.serial);
+  add('Processador / plataforma', dados.cpu); add('Memória RAM', dados.ram_gb_aprox ? dados.ram_gb_aprox + ' GB' : '');
+  add('Armazenamento', dados.armazenamento_total_gb ? (dados.armazenamento_total_gb + ' GB (livre ' + dados.armazenamento_livre_gb + ' GB, ' + dados.armazenamento_usado_pct + '% usado)') : '');
+  add('Tela', dados.tela_px ? (dados.tela_px + (dados.tela_dpi ? ' · ' + dados.tela_dpi + ' dpi' : '')) : '');
+  add('Bateria agora', dados.bateria_nivel != null ? (dados.bateria_nivel + '%' + (dados.bateria_estado ? ' · ' + dados.bateria_estado : '')) : '');
+  add('Saúde da bateria (sistema)', dados.bateria_saude);
+  add('Capacidade da bateria', dados.bateria_capacidade_pct != null ? dados.bateria_capacidade_pct + '% da original' : '');
+  add('Ciclos de carga', dados.bateria_ciclos);
+  add('Temperatura da bateria', dados.bateria_temp_c != null ? dados.bateria_temp_c + ' °C' : '');
+  add('Tensão da bateria', dados.bateria_tensao_mv != null ? (dados.bateria_tensao_mv / 1000).toFixed(2) + ' V' : '');
+  add('Operadora', dados.operadora); add('Chip (SIM)', dados.sim_estado);
+  add('Bootloader', dados.bootloader_travado === true ? 'Travado (original)' : (dados.bootloader_travado === false ? 'DESTRAVADO' : ''));
+  add('Boot verificado', dados.verified_boot);
+  dados.campos = campos;
+  return dados;
+}
+
+/* Regras de diagnóstico automático (mesmo formato dos testes da página do aparelho) */
+function diagRegrasAndroid(d){
+  const t = [];
+  const add = function(key, label, status, detalhe){ t.push({ key: key, label: label, status: status, detalhe: detalhe || '' }); };
+  // Bateria: saúde reportada pelo sistema
+  if(d.bateria_saude_cod != null){
+    if(d.bateria_saude_cod === 2) add('bat_saude', 'Saúde da bateria (sistema)', 'ok', 'Sistema reporta bateria boa');
+    else if(d.bateria_saude_cod === 1) add('bat_saude', 'Saúde da bateria (sistema)', 'atencao', 'Sistema não informa a saúde da bateria');
+    else add('bat_saude', 'Saúde da bateria (sistema)', 'falha', 'Sistema reporta: ' + d.bateria_saude);
+  }
+  // Bateria: capacidade
+  if(d.bateria_capacidade_pct != null){
+    const c = d.bateria_capacidade_pct;
+    if(c >= 80) add('bat_capacidade', 'Capacidade da bateria', 'ok', c + '% da capacidade original' + (d.bateria_ciclos != null ? ' · ' + d.bateria_ciclos + ' ciclos' : ''));
+    else if(c >= 70) add('bat_capacidade', 'Capacidade da bateria', 'atencao', c + '% da original — desgastada, considerar troca' + (d.bateria_ciclos != null ? ' · ' + d.bateria_ciclos + ' ciclos' : ''));
+    else add('bat_capacidade', 'Capacidade da bateria', 'falha', c + '% da original — recomendada a troca' + (d.bateria_ciclos != null ? ' · ' + d.bateria_ciclos + ' ciclos' : ''));
+  }else if(d.bateria_ciclos != null){
+    add('bat_ciclos', 'Ciclos de carga da bateria', d.bateria_ciclos > 800 ? 'atencao' : 'ok', d.bateria_ciclos + ' ciclos');
+  }
+  // Bateria: temperatura
+  if(d.bateria_temp_c != null){
+    if(d.bateria_temp_c >= 50) add('bat_temp', 'Temperatura da bateria', 'falha', d.bateria_temp_c + ' °C — muito quente');
+    else if(d.bateria_temp_c >= 42) add('bat_temp', 'Temperatura da bateria', 'atencao', d.bateria_temp_c + ' °C — quente (aparelho em uso ou carregando?)');
+    else add('bat_temp', 'Temperatura da bateria', 'ok', d.bateria_temp_c + ' °C');
+  }
+  // Tensão em repouso muito baixa
+  if(d.bateria_tensao_mv != null && d.bateria_nivel != null){
+    if(d.bateria_nivel >= 50 && d.bateria_tensao_mv < 3600) add('bat_tensao', 'Tensão da bateria', 'atencao', (d.bateria_tensao_mv / 1000).toFixed(2) + ' V com ' + d.bateria_nivel + '% — tensão baixa para o nível');
+    else add('bat_tensao', 'Tensão da bateria', 'ok', (d.bateria_tensao_mv / 1000).toFixed(2) + ' V');
+  }
+  // Armazenamento
+  if(d.armazenamento_usado_pct != null){
+    if(d.armazenamento_usado_pct >= 95) add('armazenamento', 'Armazenamento', 'falha', d.armazenamento_usado_pct + '% cheio — aparelho tende a travar');
+    else if(d.armazenamento_usado_pct >= 85) add('armazenamento', 'Armazenamento', 'atencao', d.armazenamento_usado_pct + '% usado (livre ' + d.armazenamento_livre_gb + ' GB)');
+    else add('armazenamento', 'Armazenamento', 'ok', d.armazenamento_usado_pct + '% usado (livre ' + d.armazenamento_livre_gb + ' GB)');
+  }
+  // RAM
+  if(d.ram_gb_aprox != null){
+    if(d.ram_gb_aprox < 2.5) add('ram', 'Memória RAM', 'atencao', d.ram_gb_aprox + ' GB — pouca memória para os apps atuais');
+    else add('ram', 'Memória RAM', 'ok', d.ram_gb_aprox + ' GB');
+  }
+  // Atualização de segurança
+  if(d.patch_seguranca){
+    const dt = new Date(d.patch_seguranca + 'T00:00:00');
+    if(!isNaN(dt.getTime())){
+      const meses = Math.round((Date.now() - dt.getTime()) / (30.44 * 86400000));
+      if(meses > 36) add('patch', 'Atualização de segurança', 'atencao', 'Patch de ' + d.patch_seguranca + ' (' + meses + ' meses atrás) — sem atualizações há muito tempo');
+      else add('patch', 'Atualização de segurança', 'ok', 'Patch de ' + d.patch_seguranca);
+    }
+  }
+  // Integridade de software
+  if(d.bootloader_travado === false) add('bootloader', 'Bootloader / software original', 'atencao', 'Bootloader destravado — o aparelho pode ter sido modificado (root/ROM customizada)');
+  else if(d.bootloader_travado === true) add('bootloader', 'Bootloader / software original', 'ok', 'Bootloader travado (software original)');
+  if(d.verified_boot && d.verified_boot !== 'green') add('boot_verificado', 'Verificação de boot', d.verified_boot === 'orange' ? 'atencao' : 'falha', 'Estado: ' + d.verified_boot + (d.verified_boot === 'orange' ? ' (destravado)' : ' (sistema alterado ou corrompido)'));
+  // Chip
+  if(d.sim_estado){
+    const s = d.sim_estado.split(',')[0].toUpperCase();
+    if(s === 'READY' || s === 'LOADED') add('sim', 'Chip (SIM)', 'ok', 'Chip reconhecido' + (d.operadora ? ' · ' + d.operadora : ''));
+    else if(s === 'ABSENT') add('sim', 'Chip (SIM)', 'atencao', 'Nenhum chip detectado (bandeja vazia ou leitor com defeito)');
+    else if(s === 'PIN_REQUIRED' || s === 'PUK_REQUIRED' || s === 'LOCKED') add('sim', 'Chip (SIM)', 'atencao', 'Chip bloqueado por PIN/PUK');
+    else if(s === 'NOT_READY') add('sim', 'Chip (SIM)', 'atencao', 'Chip não ficou pronto — verifique o leitor');
+    else add('sim', 'Chip (SIM)', 'atencao', 'Estado do chip: ' + d.sim_estado);
+  }
+  return t;
+}
+function diagResumoTestes(testes){
+  const c = { ok:0, falha:0, atencao:0, pulado:0, nao_suportado:0 };
+  testes.forEach(function(r){ c[r.status] = (c[r.status] || 0) + 1; });
+  const partes = [testes.length + ' verificações', c.ok + ' ok'];
+  if(c.falha) partes.push(c.falha + ' com defeito');
+  if(c.atencao) partes.push(c.atencao + ' em atenção');
+  const nt = (c.pulado || 0) + (c.nao_suportado || 0);
+  if(nt) partes.push(nt + ' não testadas');
+  let txt = partes.join(' · ');
+  const def = testes.filter(function(r){ return r.status === 'falha'; }).map(function(r){ return r.label; });
+  if(def.length) txt += '\nCom defeito: ' + def.join(', ') + '.';
+  const at = testes.filter(function(r){ return r.status === 'atencao'; }).map(function(r){ return r.label; });
+  if(at.length) txt += '\nAtenção: ' + at.join(', ') + '.';
+  return txt;
+}
+
+/* ===== DIAGNÓSTICO: tela do sistema ===== */
+const DIAG_STATUS = {
+  aguardando: { t:'Aguardando aparelho', c:'badge-muted' },
+  conectado: { t:'Aparelho conectado', c:'badge-blue' },
+  em_andamento: { t:'Testando', c:'badge-warning' },
+  concluido: { t:'Concluído', c:'badge-good' }
+};
+const DIAG_TESTE_ROT = { ok:'Funcionando', falha:'Com defeito', atencao:'Atenção', pulado:'Não testado', nao_suportado:'Não testável' };
+const DIAG_TESTE_BADGE = { ok:'badge-good', falha:'badge-critical', atencao:'badge-warning', pulado:'badge-muted', nao_suportado:'badge-muted' };
+const DIAG_LIB_ADB = 'https://cdn.jsdelivr.net/npm/@yume-chan/adb@2.6.4/+esm';
+const DIAG_LIB_WEBUSB = 'https://cdn.jsdelivr.net/npm/@yume-chan/adb-daemon-webusb@2.3.2/+esm';
+const DIAG_LIB_CRED = 'https://cdn.jsdelivr.net/npm/@yume-chan/adb-credential-web@2.1.0/+esm';
+const DIAG_LIB_QR = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';
+let diagPoll = null;
+
+function diagLink(id){
+  return location.origin + location.pathname.replace(/[^\/]*$/, '') + 'diagnostico.html?s=' + id;
+}
+function diagBadge(st){
+  const s = DIAG_STATUS[st] || { t: st || '—', c:'badge-muted' };
+  return '<span class="badge ' + s.c + '"><span class="badge-dot"></span>' + escapeHtml(s.t) + '</span>';
+}
+function diagNome(d){
+  const x = d.dados || {};
+  const nome = [x.marca, x.modelo].filter(Boolean).join(' ').trim() || x.modelo || [d.marca, d.modelo].filter(Boolean).join(' ').trim();
+  return nome || 'Aparelho ainda não identificado';
+}
+function diagContagem(testes){
+  const c = { ok:0, falha:0, atencao:0, pulado:0, nao_suportado:0 };
+  (testes || []).forEach(function(t){ c[t.status] = (c[t.status] || 0) + 1; });
+  return c;
+}
+function diagPilulas(testes){
+  const c = diagContagem(testes);
+  if(!(testes || []).length) return '<span class="hint">sem resultados ainda</span>';
+  let h = '<span class="badge badge-good">' + c.ok + ' ok</span> ';
+  if(c.atencao) h += '<span class="badge badge-warning">' + c.atencao + ' atenção</span> ';
+  if(c.falha) h += '<span class="badge badge-critical">' + c.falha + ' defeito</span> ';
+  const nt = c.pulado + c.nao_suportado;
+  if(nt) h += '<span class="badge badge-muted">' + nt + ' não testadas</span>';
+  return h;
+}
+function diagCarregarQr(){
+  return new Promise(function(res){
+    if(window.QRCode) return res(true);
+    const sc = document.createElement('script');
+    sc.src = DIAG_LIB_QR;
+    sc.onload = function(){ res(!!window.QRCode); };
+    sc.onerror = function(){ res(false); };
+    document.head.appendChild(sc);
+  });
+}
+
+async function renderDiagnostico(){
+  const [diag, clientes, os] = await Promise.all([sbSelect('diagnosticos'), sbSelect('clientes'), sbSelect('ordens_servico')]);
+  state.cache.clientes = clientes;
+  state.cache.os = os;
+  const lista = diag.filter(function(d){ return d.ativo !== false; });
+  state.cache.diag = lista;
+  const clienteById = {}; clientes.forEach(function(c){ clienteById[c.id] = c; });
+  const osById = {}; os.forEach(function(o){ osById[o.id] = o; });
+  const linhas = lista.map(function(d){
+    const cl = d.cliente_id ? clienteById[d.cliente_id] : null;
+    const o = d.os_id ? osById[d.os_id] : null;
+    const vinculo = [cl ? escapeHtml(cl.nome) : '', o ? 'OS #' + escapeHtml(o.numero) : ''].filter(Boolean).join(' · ') || '<span class="hint">sem vínculo</span>';
+    const abrirLink = d.status !== 'concluido' && d.origem !== 'usb'
+      ? '<button class="btn btn-sm btn-secondary" data-diag-link="' + d.id + '">Link / QR</button> ' : '';
+    return '<tr>' +
+      '<td>#' + String(d.numero).padStart(2, '0') + '</td>' +
+      '<td>' + fmtDateTime(d.created_at) + '</td>' +
+      '<td><strong>' + escapeHtml(diagNome(d)) + '</strong><div class="hint">' + (d.origem === 'usb' ? 'Leitura por USB' : 'Teste no aparelho') + (d.dados && d.dados.sistema ? ' · ' + escapeHtml(d.dados.sistema) : '') + '</div></td>' +
+      '<td>' + diagBadge(d.status) + '</td>' +
+      '<td>' + diagPilulas(d.testes) + '</td>' +
+      '<td>' + vinculo + '</td>' +
+      '<td style="white-space:nowrap;">' + abrirLink +
+        '<button class="btn btn-sm btn-primary" data-diag-ver="' + d.id + '">Abrir laudo</button> ' +
+        '<button class="btn btn-sm btn-ghost" data-diag-del="' + d.id + '" title="Excluir">&#128465;</button></td>' +
+      '</tr>';
+  }).join('');
+  document.getElementById('content').innerHTML =
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:20px;">' +
+      '<div class="card">' +
+        '<div style="font-size:15px;font-weight:700;margin-bottom:4px;">&#128241; Testar pelo próprio aparelho</div>' +
+        '<p class="hint" style="font-size:13px;margin:0 0 12px;">Funciona em <b>Android, iPhone, iPad e tablets</b>. Gera um QR code: o cliente/técnico abre no aparelho, faz os testes (tela, toque, som, câmeras, sensores, bateria...) e o resultado aparece aqui na hora.</p>' +
+        '<button class="btn btn-primary" id="diagNovo">Novo diagnóstico (QR code)</button>' +
+      '</div>' +
+      '<div class="card">' +
+        '<div style="font-size:15px;font-weight:700;margin-bottom:4px;">&#128268; Ler Android por cabo USB</div>' +
+        '<p class="hint" style="font-size:13px;margin:0 0 12px;">Plugue o celular/tablet <b>Android</b> neste computador e leia bateria, armazenamento, memória, chip e software automaticamente. Precisa de <b>Chrome ou Edge</b> e Depuração USB ativada no aparelho.</p>' +
+        '<button class="btn btn-secondary" id="diagUsb">Ler aparelho por USB</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="card">' +
+      '<h2 style="font-size:13px;margin:0 0 12px;color:var(--text-secondary);text-transform:uppercase;">' + lista.length + ' diagnósticos</h2>' +
+      (lista.length
+        ? '<div class="table-wrap"><table><thead><tr><th>#</th><th>Data</th><th>Aparelho</th><th>Situação</th><th>Resultado</th><th>Vínculo</th><th></th></tr></thead><tbody>' + linhas + '</tbody></table></div>'
+        : '<p class="hint" style="font-size:13px;">Nenhum diagnóstico ainda. Use um dos botões acima para começar.</p>') +
+    '</div>';
+  document.getElementById('diagNovo').onclick = diagNovaSessao;
+  document.getElementById('diagUsb').onclick = diagLerUsb;
+  document.querySelectorAll('[data-diag-ver]').forEach(function(b){ b.onclick = function(){ diagVerLaudo(b.dataset.diagVer); }; });
+  document.querySelectorAll('[data-diag-link]').forEach(function(b){ b.onclick = function(){ diagMostrarSessao(b.dataset.diagLink); }; });
+  document.querySelectorAll('[data-diag-del]').forEach(function(b){
+    b.onclick = async function(){
+      if(!confirm('Excluir este diagnóstico?')) return;
+      const { error } = await sb.from('diagnosticos').update({ ativo: false }).eq('id', b.dataset.diagDel);
+      if(error){ toast('Erro ao excluir: ' + error.message, 'err'); return; }
+      toast('Diagnóstico excluído', 'ok');
+      renderDiagnostico();
+    };
+  });
+}
+
+/* ---------- Sessão: link + QR + acompanhamento ao vivo ---------- */
+async function diagNovaSessao(){
+  const btn = document.getElementById('diagNovo');
+  if(btn) btn.disabled = true;
+  const { data, error } = await sb.from('diagnosticos').insert({ origem: 'aparelho', status: 'aguardando', categoria: 'celular' }).select().single();
+  if(btn) btn.disabled = false;
+  if(error || !data){ toast('Não foi possível criar a sessão: ' + (error ? error.message : ''), 'err'); return; }
+  diagMostrarSessao(data.id);
+}
+async function diagMostrarSessao(id){
+  const url = diagLink(id);
+  openModal(
+    '<div class="modal-header"><h3>Diagnóstico no aparelho</h3><button class="close-x" id="diagFechaSessao">&#10005;</button></div>' +
+    '<div class="modal-body" id="diagLinkBox">' +
+      '<p style="margin:0 0 12px;font-size:13.5px;">No celular ou tablet que será testado, <b>aponte a câmera para o QR code</b> (ou abra o link). Use o Chrome (Android) ou o Safari (iPhone/iPad).</p>' +
+      '<div style="text-align:center;margin:8px 0 14px;"><canvas id="diagQr" width="220" height="220" style="max-width:100%;"></canvas><div id="diagQrMsg" class="hint"></div></div>' +
+      '<div class="field"><label>Link do teste</label><div class="row-flex"><input id="diagUrl" readonly value="' + escapeHtml(url) + '"><button class="btn btn-secondary" id="diagCopiar" style="flex:0 0 auto;">Copiar</button></div></div>' +
+      '<div id="diagLive" style="margin-top:14px;padding:12px 14px;border:1px solid var(--gridline);border-radius:10px;background:var(--surface-1,#fafafa);">' +
+        '<div style="font-size:13px;color:var(--text-secondary);">Situação</div><div id="diagLiveSt" style="margin-top:4px;">' + diagBadge('aguardando') + '</div><div id="diagLiveTxt" class="hint" style="margin-top:6px;">Esperando o aparelho abrir o link...</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="modal-footer"><button class="btn btn-secondary" id="diagFechaSessao2">Fechar (o teste continua valendo)</button></div>');
+  const fechar = function(){
+    if(diagPoll){ clearInterval(diagPoll); diagPoll = null; }
+    closeModal();
+    if(state.view === 'diagnostico') renderDiagnostico();
+  };
+  document.getElementById('diagFechaSessao').onclick = fechar;
+  document.getElementById('diagFechaSessao2').onclick = fechar;
+  document.getElementById('diagCopiar').onclick = async function(){
+    try{ await navigator.clipboard.writeText(url); toast('Link copiado', 'ok'); }
+    catch(e){ const i = document.getElementById('diagUrl'); i.select(); document.execCommand('copy'); toast('Link copiado', 'ok'); }
+  };
+  diagCarregarQr().then(function(ok){
+    const cv = document.getElementById('diagQr');
+    if(!cv) return;
+    if(ok && window.QRCode){ window.QRCode.toCanvas(cv, url, { width: 220, margin: 1 }, function(err){ if(err) document.getElementById('diagQrMsg').textContent = 'Não foi possível gerar o QR. Use o link abaixo.'; }); }
+    else{ cv.style.display = 'none'; document.getElementById('diagQrMsg').textContent = 'Não foi possível carregar o gerador de QR. Use o link abaixo.'; }
+  });
+  if(diagPoll) clearInterval(diagPoll);
+  diagPoll = setInterval(async function(){
+    if(!document.getElementById('diagLinkBox')){ clearInterval(diagPoll); diagPoll = null; return; }
+    const { data } = await sb.from('diagnosticos').select('id,status,resumo,testes,dados').eq('id', id).limit(1);
+    const d = data && data[0];
+    if(!d) return;
+    const st = document.getElementById('diagLiveSt'), tx = document.getElementById('diagLiveTxt');
+    if(!st || !tx) return;
+    st.innerHTML = diagBadge(d.status);
+    const n = (d.testes || []).length;
+    if(d.status === 'conectado') tx.textContent = (d.dados && d.dados.modelo ? d.dados.modelo + ' conectado. ' : 'Aparelho conectado. ') + 'Aguardando iniciar os testes...';
+    else if(d.status === 'em_andamento') tx.innerHTML = n + ' verificações feitas · ' + diagPilulas(d.testes);
+    else if(d.status === 'concluido'){
+      clearInterval(diagPoll); diagPoll = null;
+      toast('Diagnóstico recebido do aparelho!', 'ok');
+      closeModal();
+      if(state.view === 'diagnostico') renderDiagnostico();
+      diagVerLaudo(id);
+    }
+  }, 3000);
+}
+
+/* ---------- Laudo ---------- */
+async function diagVerLaudo(id){
+  const { data, error } = await sb.from('diagnosticos').select('*').eq('id', id).limit(1);
+  const d = data && data[0];
+  if(error || !d){ toast('Laudo não encontrado', 'err'); return; }
+  if(!state.cache.clientes) state.cache.clientes = await sbSelect('clientes');
+  if(!state.cache.os) state.cache.os = await sbSelect('ordens_servico');
+  const x = d.dados || {};
+  const campos = (x.campos || []).map(function(c){ return '<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--gridline);font-size:13px;"><span style="color:var(--text-secondary);">' + escapeHtml(c.k) + '</span><strong style="text-align:right;">' + escapeHtml(c.v) + '</strong></div>'; }).join('');
+  const testes = (d.testes || []).map(function(t){
+    return '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--gridline);">' +
+      '<div style="font-size:13.5px;"><strong>' + escapeHtml(t.label) + '</strong>' + (t.detalhe ? '<div class="hint">' + escapeHtml(t.detalhe) + '</div>' : '') + '</div>' +
+      '<span class="badge ' + (DIAG_TESTE_BADGE[t.status] || 'badge-muted') + '" style="white-space:nowrap;">' + escapeHtml(DIAG_TESTE_ROT[t.status] || t.status) + '</span></div>';
+  }).join('');
+  const opCli = '<option value="">— sem cliente —</option>' + state.cache.clientes.map(function(c){ return '<option value="' + c.id + '"' + (c.id === d.cliente_id ? ' selected' : '') + '>' + escapeHtml(c.nome) + '</option>'; }).join('');
+  const opOs = '<option value="">— sem OS —</option>' + state.cache.os.slice(0, 150).map(function(o){ return '<option value="' + o.id + '"' + (o.id === d.os_id ? ' selected' : '') + '>#' + escapeHtml(o.numero) + ' · ' + escapeHtml([o.marca, o.modelo].filter(Boolean).join(' ') || 'aparelho') + '</option>'; }).join('');
+  openModal(
+    '<div class="modal-header"><h3>Laudo #' + String(d.numero).padStart(2, '0') + ' · ' + escapeHtml(diagNome(d)) + '</h3><button class="close-x" onclick="closeModal()">&#10005;</button></div>' +
+    '<div class="modal-body">' +
+      '<div style="margin-bottom:12px;">' + diagBadge(d.status) + ' <span class="hint">' + fmtDateTime(d.updated_at || d.created_at) + ' · ' + (d.origem === 'usb' ? 'Leitura por USB' : 'Teste no aparelho') + '</span></div>' +
+      (d.resumo ? '<div style="white-space:pre-line;padding:12px 14px;border-radius:10px;background:#eef4fc;color:#184f95;font-size:13.5px;margin-bottom:14px;">' + escapeHtml(d.resumo) + '</div>' : '') +
+      (d.origem === 'usb' ? '<div class="hint" style="margin-bottom:12px;">A leitura por USB cobre bateria, armazenamento, memória, chip e software. Tela, toque, alto-falante, microfone e câmeras só são testados pelo teste no próprio aparelho (QR code).</div>' : '') +
+      (testes ? '<div style="font-size:12px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;margin:6px 0 2px;">Verificações</div>' + testes : '') +
+      (campos ? '<div style="font-size:12px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;margin:16px 0 2px;">Dados do aparelho</div>' + campos : '') +
+      (x.observacoes ? '<div style="margin-top:14px;font-size:13px;"><b>Observações do técnico:</b><div style="white-space:pre-line;">' + escapeHtml(x.observacoes) + '</div></div>' : '') +
+      '<div class="row-flex" style="margin-top:18px;"><div class="field"><label>Cliente</label><select id="diagCli">' + opCli + '</select></div><div class="field"><label>Ordem de serviço</label><select id="diagOs">' + opOs + '</select></div></div>' +
+      '<div class="hint">Vincular ao cliente/OS é opcional e fica registrado no laudo.</div>' +
+    '</div>' +
+    '<div class="modal-footer">' +
+      '<button class="btn btn-secondary" id="diagParaOs">Enviar resumo p/ OS</button>' +
+      '<button class="btn btn-secondary" id="diagImp">Imprimir laudo</button>' +
+      '<button class="btn btn-primary" id="diagSalvaVinculo">Salvar vínculo</button>' +
+    '</div>');
+  document.getElementById('diagSalvaVinculo').onclick = async function(){
+    const cli = document.getElementById('diagCli').value || null, osId = document.getElementById('diagOs').value || null;
+    const { error: e2 } = await sb.from('diagnosticos').update({ cliente_id: cli, os_id: osId, updated_at: new Date().toISOString() }).eq('id', id);
+    if(e2){ toast('Erro ao salvar: ' + e2.message, 'err'); return; }
+    toast('Vínculo salvo', 'ok');
+    d.cliente_id = cli; d.os_id = osId;
+    if(state.view === 'diagnostico') renderDiagnostico();
+  };
+  document.getElementById('diagImp').onclick = function(){ diagImprimir(d); };
+  document.getElementById('diagParaOs').onclick = async function(){
+    const osId = document.getElementById('diagOs').value;
+    if(!osId){ toast('Escolha uma ordem de serviço primeiro', 'err'); return; }
+    const { data: od } = await sb.from('ordens_servico').select('id,diagnostico').eq('id', osId).limit(1);
+    const atual = (od && od[0] && od[0].diagnostico) || '';
+    const bloco = '[Diagnóstico automático #' + String(d.numero).padStart(2, '0') + ' - ' + new Date().toLocaleDateString('pt-BR') + ']\n' + (d.resumo || '');
+    if(atual.indexOf('[Diagnóstico automático #' + String(d.numero).padStart(2, '0')) >= 0){ toast('Esse laudo já foi enviado para a OS', 'err'); return; }
+    const { error: e3 } = await sb.from('ordens_servico').update({ diagnostico: atual ? atual + '\n\n' + bloco : bloco }).eq('id', osId);
+    if(e3){ toast('Erro ao enviar para a OS: ' + e3.message, 'err'); return; }
+    await sb.from('diagnosticos').update({ os_id: osId, cliente_id: document.getElementById('diagCli').value || null }).eq('id', id);
+    toast('Resumo adicionado ao diagnóstico da OS', 'ok');
+  };
+}
+function diagImprimir(d){
+  const x = d.dados || {};
+  const cor = { ok:'#0a6b0a', falha:'#96201f', atencao:'#8a5c00', pulado:'#52514e', nao_suportado:'#52514e' };
+  const campos = (x.campos || []).map(function(c){ return '<tr><td>' + escapeHtml(c.k) + '</td><td><b>' + escapeHtml(c.v) + '</b></td></tr>'; }).join('');
+  const testes = (d.testes || []).map(function(t){ return '<tr><td>' + escapeHtml(t.label) + (t.detalhe ? '<br><small>' + escapeHtml(t.detalhe) + '</small>' : '') + '</td><td style="color:' + (cor[t.status] || '#000') + ';font-weight:700;white-space:nowrap;">' + escapeHtml(DIAG_TESTE_ROT[t.status] || t.status) + '</td></tr>'; }).join('');
+  const win = window.open('', '_blank');
+  if(!win){ toast('Libere pop-ups para imprimir o laudo', 'err'); return; }
+  win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Laudo ' + String(d.numero).padStart(2, '0') + ' - ' + escapeHtml(diagNome(d)) + ' - UpTECH</title><style>' +
+    'body{font-family:Arial,sans-serif;color:#111;margin:28px;font-size:13px;}h1{font-size:20px;margin:0;}h2{font-size:13px;text-transform:uppercase;color:#555;margin:22px 0 6px;border-bottom:1px solid #ccc;padding-bottom:4px;}' +
+    'table{width:100%;border-collapse:collapse;}td{padding:6px 4px;border-bottom:1px solid #e5e5e5;vertical-align:top;}td small{color:#666;}.res{background:#eef4fc;padding:10px 12px;border-radius:6px;white-space:pre-line;margin-top:10px;}.top{display:flex;justify-content:space-between;align-items:flex-start;}' +
+    '</style></head><body><div class="top"><div><h1>Laudo de Diagnóstico #' + String(d.numero).padStart(2, '0') + '</h1><div>' + escapeHtml(diagNome(d)) + (x.sistema ? ' · ' + escapeHtml(x.sistema) : '') + '</div></div>' +
+    '<div style="text-align:right;"><b>UP TECH Soluções Tecnológicas</b><br>' + fmtDateTime(d.updated_at || d.created_at) + '</div></div>' +
+    (d.resumo ? '<div class="res">' + escapeHtml(d.resumo) + '</div>' : '') +
+    (testes ? '<h2>Verificações</h2><table>' + testes + '</table>' : '') +
+    (campos ? '<h2>Dados do aparelho</h2><table>' + campos + '</table>' : '') +
+    (x.observacoes ? '<h2>Observações do técnico</h2><div style="white-space:pre-line;">' + escapeHtml(x.observacoes) + '</div>' : '') +
+    '<p style="margin-top:30px;color:#666;font-size:11px;">Diagnóstico automatizado de apoio. Itens marcados como "Não testado" não foram avaliados. Este laudo não substitui a avaliação técnica completa em bancada.</p>' +
+    '<script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>');
+  win.document.close();
+}
+
+/* ---------- Leitura Android por USB (WebUSB + ADB) ---------- */
+async function diagLerUsb(){
+  openModal(
+    '<div class="modal-header"><h3>Ler Android por USB</h3><button class="close-x" id="diagUsbX">&#10005;</button></div>' +
+    '<div class="modal-body">' +
+      '<div id="diagUsbIntro">' +
+        '<p style="margin:0 0 8px;font-size:13.5px;"><b>Antes de conectar:</b></p>' +
+        '<ol style="margin:0 0 12px 18px;padding:0;font-size:13px;line-height:1.7;">' +
+          '<li>No celular: <b>Configurações &gt; Sobre o telefone</b> e toque 7 vezes em "Número da versão".</li>' +
+          '<li>Em <b>Opções do desenvolvedor</b>, ative a <b>Depuração USB</b>.</li>' +
+          '<li>Plugue o cabo (de dados) neste computador. Use <b>Chrome ou Edge</b>.</li>' +
+          '<li>Clique em Conectar, escolha o aparelho e, no celular, toque em <b>Permitir</b> (marque "sempre permitir").</li>' +
+        '</ol>' +
+        '<div class="hint">Se aparecer erro de "interface em uso": feche programas de celular (Android Studio, 3uTools, Samsung Smart Switch) ou rode <code>adb kill-server</code>. No Windows pode ser preciso instalar o driver USB do fabricante.</div>' +
+      '</div>' +
+      '<div id="diagUsbLog" style="margin-top:12px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.7;color:var(--text-secondary);"></div>' +
+    '</div>' +
+    '<div class="modal-footer"><button class="btn btn-secondary" id="diagUsbCancel">Cancelar</button><button class="btn btn-primary" id="diagUsbGo">Conectar e ler</button></div>');
+  document.getElementById('diagUsbX').onclick = closeModal;
+  document.getElementById('diagUsbCancel').onclick = closeModal;
+  const logEl = document.getElementById('diagUsbLog');
+  const log = function(m, cor){ logEl.insertAdjacentHTML('beforeend', '<div' + (cor ? ' style="color:' + cor + ';"' : '') + '>' + escapeHtml(m) + '</div>'); };
+  if(!navigator.usb){
+    document.getElementById('diagUsbGo').disabled = true;
+    log('Este navegador não tem acesso a USB. Abra o sistema no Chrome ou Edge, no computador.', '#d03b3b');
+    return;
+  }
+  document.getElementById('diagUsbGo').onclick = async function(){
+    const go = document.getElementById('diagUsbGo');
+    go.disabled = true; logEl.innerHTML = '';
+    let adb = null;
+    try{
+      log('Carregando componentes...');
+      const libs = await Promise.all([import(DIAG_LIB_ADB), import(DIAG_LIB_WEBUSB), import(DIAG_LIB_CRED)]);
+      const A = libs[0], W = libs[1], Cred = libs[2].default;
+      const manager = W.AdbDaemonWebUsbDeviceManager.BROWSER;
+      if(!manager) throw new Error('Navegador sem suporte a WebUSB.');
+      log('Escolha o aparelho na janela do navegador...');
+      const device = await manager.requestDevice();
+      if(!device){ log('Nenhum aparelho selecionado.'); go.disabled = false; return; }
+      log('Conectando... olhe a tela do celular e toque em PERMITIR.');
+      const connection = await device.connect();
+      const transport = await A.AdbDaemonTransport.authenticate({ serial: device.serial, connection: connection, credentialStore: new Cred('UpTECH') });
+      adb = new A.Adb(transport);
+      log('Conectado. Lendo informações...', '#0a6b0a');
+      const rodar = async function(cmd){
+        try{
+          return await Promise.race([
+            adb.subprocess.noneProtocol.spawnWaitText(cmd),
+            new Promise(function(_, rej){ setTimeout(function(){ rej(new Error('tempo esgotado')); }, 10000); })
+          ]);
+        }catch(e){ return ''; }
+      };
+      const bat = '/sys/class/power_supply/battery/';
+      const raw = { serial: device.serial || '' };
+      raw.getprop = await rodar('getprop');
+      if(!raw.getprop.trim()) throw new Error('O aparelho conectou mas não respondeu aos comandos. Tente de novo.');
+      log('Sistema e modelo lidos');
+      raw.battery = await rodar('dumpsys battery'); log('Bateria lida');
+      raw.meminfo = await rodar('cat /proc/meminfo'); log('Memória lida');
+      raw.df = await rodar('df -k /data'); log('Armazenamento lido');
+      raw.wm_size = await rodar('wm size');
+      raw.wm_density = await rodar('wm density');
+      raw.charge_full = await rodar('cat ' + bat + 'charge_full 2>/dev/null');
+      raw.charge_full_design = await rodar('cat ' + bat + 'charge_full_design 2>/dev/null');
+      raw.cycle_count = await rodar('cat ' + bat + 'cycle_count 2>/dev/null || cat ' + bat + 'battery_cycle 2>/dev/null');
+      try{ await adb.close(); }catch(e){}
+      adb = null;
+      const dados = diagMontarDadosAndroid(raw);
+      const testes = diagRegrasAndroid(dados);
+      const resumo = diagResumoTestes(testes);
+      log('Analisando e salvando laudo...');
+      const { data, error } = await sb.from('diagnosticos').insert({
+        origem: 'usb', plataforma: 'android', categoria: 'celular', marca: dados.marca, modelo: dados.modelo,
+        status: 'concluido', dados: dados, testes: testes, resumo: resumo
+      }).select().single();
+      if(error) throw new Error('Não foi possível salvar o laudo: ' + error.message);
+      toast('Leitura concluída', 'ok');
+      closeModal();
+      if(state.view === 'diagnostico') renderDiagnostico();
+      diagVerLaudo(data.id);
+    }catch(e){
+      console.error(e);
+      let msg = e && e.message ? e.message : String(e);
+      if(e && e.name === 'NetworkError') msg = 'Não foi possível abrir a porta USB do aparelho (outro programa está usando?). Feche o adb/Android Studio/3uTools e tente de novo.';
+      if(/auth|denied|negad/i.test(msg)) msg = 'A conexão não foi autorizada no celular. Tente de novo e toque em "Permitir" na tela do aparelho.';
+      log('Falhou: ' + msg, '#d03b3b');
+      if(adb){ try{ await adb.close(); }catch(_){} }
+      go.disabled = false; go.textContent = 'Tentar de novo';
+    }
+  };
+}
+
 async function navigate(view, force=false){
   state.view = view;
   document.querySelectorAll('.navitem').forEach(el=> el.classList.toggle('active', el.dataset.view===view));
@@ -720,6 +1288,7 @@ async function navigate(view, force=false){
       case 'dashboard': await renderDashboard(); break;
       case 'pdv': await renderPDV(); break;
       case 'orcamentos': await renderOrcamentos(); break;
+      case 'diagnostico': await renderDiagnostico(); break;
       case 'os': await renderOS(); break; case 'checklist': await renderChecklist(); break;
       case 'estoque': await renderEstoque(); break;
       case 'carcacas': await renderCarcacas(); break;
